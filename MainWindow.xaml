@@ -34,6 +34,133 @@
             <Setter Property="Padding" Value="8,6" />
         </Style>
 
+        <Style TargetType="ComboBox">
+            <Setter Property="Background" Value="#101419" />
+            <Setter Property="BorderBrush" Value="#343A40" />
+            <Setter Property="Foreground" Value="#D8D4C1" />
+            <Setter Property="Padding" Value="8,6" />
+            <Setter Property="IsEditable" Value="True" />
+            <Setter Property="IsTextSearchEnabled" Value="True" />
+            <Setter Property="StaysOpenOnEdit" Value="True" />
+            <Setter Property="MaxDropDownHeight" Value="260" />
+            <Setter Property="ScrollViewer.CanContentScroll" Value="True" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ComboBox">
+                        <Grid>
+                            <Border x:Name="Root"
+                                    Background="{TemplateBinding Background}"
+                                    BorderBrush="{TemplateBinding BorderBrush}"
+                                    BorderThickness="1"
+                                    CornerRadius="3">
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="30" />
+                                    </Grid.ColumnDefinitions>
+
+                                    <TextBox x:Name="PART_EditableTextBox"
+                                             Grid.Column="0"
+                                             Margin="0"
+                                             Padding="{TemplateBinding Padding}"
+                                             Background="Transparent"
+                                             BorderThickness="0"
+                                             Foreground="{TemplateBinding Foreground}"
+                                             CaretBrush="{StaticResource AccentBrush}"
+                                             VerticalContentAlignment="Center"
+                                             Focusable="True" />
+
+                                    <ContentPresenter x:Name="ContentSite"
+                                                      Grid.Column="0"
+                                                      Margin="{TemplateBinding Padding}"
+                                                      Content="{TemplateBinding SelectionBoxItem}"
+                                                      ContentTemplate="{TemplateBinding SelectionBoxItemTemplate}"
+                                                      ContentStringFormat="{TemplateBinding SelectionBoxItemStringFormat}"
+                                                      IsHitTestVisible="False"
+                                                      VerticalAlignment="Center"
+                                                      Visibility="Collapsed" />
+
+                                    <ToggleButton x:Name="DropDownToggle"
+                                                  Grid.Column="1"
+                                                  Background="Transparent"
+                                                  BorderThickness="0"
+                                                  Focusable="False"
+                                                  IsChecked="{Binding IsDropDownOpen, Mode=TwoWay, RelativeSource={RelativeSource TemplatedParent}}">
+                                        <Path Fill="#AFA890"
+                                              HorizontalAlignment="Center"
+                                              VerticalAlignment="Center"
+                                              Data="M 0 0 L 4 4 L 8 0 Z" />
+                                    </ToggleButton>
+                                </Grid>
+                            </Border>
+
+                            <Popup x:Name="PART_Popup"
+                                   AllowsTransparency="True"
+                                   Focusable="False"
+                                   IsOpen="{TemplateBinding IsDropDownOpen}"
+                                   Placement="Bottom"
+                                   PopupAnimation="Fade">
+                                <Border MinWidth="{Binding ActualWidth, RelativeSource={RelativeSource TemplatedParent}}"
+                                        MaxHeight="{TemplateBinding MaxDropDownHeight}"
+                                        Background="#101419"
+                                        BorderBrush="#343A40"
+                                        BorderThickness="1"
+                                        CornerRadius="3">
+                                    <ScrollViewer Padding="0"
+                                                  CanContentScroll="True"
+                                                  VerticalScrollBarVisibility="Auto">
+                                        <ItemsPresenter />
+                                    </ScrollViewer>
+                                </Border>
+                            </Popup>
+                        </Grid>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Root" Property="BorderBrush" Value="#4B4324" />
+                            </Trigger>
+                            <Trigger Property="IsKeyboardFocusWithin" Value="True">
+                                <Setter TargetName="Root" Property="BorderBrush" Value="{StaticResource AccentBrush}" />
+                            </Trigger>
+                            <Trigger Property="IsEditable" Value="False">
+                                <Setter TargetName="PART_EditableTextBox" Property="Visibility" Value="Collapsed" />
+                                <Setter TargetName="ContentSite" Property="Visibility" Value="Visible" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style TargetType="ComboBoxItem">
+            <Setter Property="Background" Value="#101419" />
+            <Setter Property="Foreground" Value="#D8D4C1" />
+            <Setter Property="Padding" Value="9,6" />
+            <Setter Property="MinHeight" Value="28" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ComboBoxItem">
+                        <Border x:Name="ItemBorder"
+                                Background="{TemplateBinding Background}"
+                                BorderBrush="#1B232B"
+                                BorderThickness="0,0,0,1"
+                                Padding="{TemplateBinding Padding}">
+                            <ContentPresenter />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsHighlighted" Value="True">
+                                <Setter TargetName="ItemBorder" Property="Background" Value="#242617" />
+                                <Setter Property="Foreground" Value="#F3EFD9" />
+                            </Trigger>
+                            <Trigger Property="IsSelected" Value="True">
+                                <Setter TargetName="ItemBorder" Property="Background" Value="#2C2917" />
+                                <Setter Property="Foreground" Value="#F3EFD9" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
         <Style TargetType="TreeView">
             <Setter Property="Background" Value="Transparent" />
             <Setter Property="BorderThickness" Value="0" />
@@ -101,7 +228,7 @@
 
     <Grid>
         <Grid.ColumnDefinitions>
-            <ColumnDefinition Width="350" />
+            <ColumnDefinition Width="420" />
             <ColumnDefinition Width="*" />
         </Grid.ColumnDefinitions>
 
@@ -167,38 +294,50 @@
                                     BorderBrush="#292817"
                                     BorderThickness="1"
                                     CornerRadius="4">
-                                <TreeView x:Name="AssetTree"
-                                          Margin="6"
-                                          SelectedItemChanged="AssetTree_SelectedItemChanged">
-                                    <TreeView.ItemTemplate>
-                                        <HierarchicalDataTemplate ItemsSource="{Binding Assets}">
-                                            <StackPanel Orientation="Horizontal">
-                                                <TextBlock Text="{Binding DisplayName}" FontWeight="SemiBold" />
-                                                <TextBlock Text="{Binding Badge}"
-                                                           Margin="8,0,0,0"
-                                                           Foreground="{StaticResource AccentBrush}"
-                                                           FontSize="11" />
-                                            </StackPanel>
-                                            <HierarchicalDataTemplate.ItemTemplate>
-                                                <DataTemplate>
-                                                    <StackPanel Margin="0,3">
-                                                        <TextBlock Text="{Binding DisplayName}" FontWeight="SemiBold" />
-                                                        <TextBlock Text="{Binding Status}"
-                                                                   Foreground="{StaticResource MutedBrush}"
-                                                                   FontSize="11" />
-                                                    </StackPanel>
-                                                </DataTemplate>
-                                            </HierarchicalDataTemplate.ItemTemplate>
-                                        </HierarchicalDataTemplate>
-                                    </TreeView.ItemTemplate>
-                                </TreeView>
+                                <Grid Margin="6">
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="*" />
+                                    </Grid.RowDefinitions>
+
+                                    <TextBox x:Name="AssetSearchBox"
+                                             Margin="0,0,0,8"
+                                             TextChanged="AssetSearchBox_TextChanged"
+                                             Text="" />
+
+                                    <TreeView x:Name="AssetTree"
+                                              Grid.Row="1"
+                                              SelectedItemChanged="AssetTree_SelectedItemChanged">
+                                        <TreeView.ItemTemplate>
+                                            <HierarchicalDataTemplate ItemsSource="{Binding Assets}">
+                                                <StackPanel Orientation="Horizontal">
+                                                    <TextBlock Text="{Binding DisplayName}" FontWeight="SemiBold" />
+                                                    <TextBlock Text="{Binding Badge}"
+                                                               Margin="8,0,0,0"
+                                                               Foreground="{StaticResource AccentBrush}"
+                                                               FontSize="11" />
+                                                </StackPanel>
+                                                <HierarchicalDataTemplate.ItemTemplate>
+                                                    <DataTemplate>
+                                                        <StackPanel Margin="0,3">
+                                                            <TextBlock Text="{Binding DisplayName}" FontWeight="SemiBold" />
+                                                            <TextBlock Text="{Binding Status}"
+                                                                       Foreground="{StaticResource MutedBrush}"
+                                                                       FontSize="11" />
+                                                        </StackPanel>
+                                                    </DataTemplate>
+                                                </HierarchicalDataTemplate.ItemTemplate>
+                                            </HierarchicalDataTemplate>
+                                        </TreeView.ItemTemplate>
+                                    </TreeView>
+                                </Grid>
                             </Border>
                         </Grid>
                     </TabItem>
 
                     <TabItem Header="Troops">
                         <ScrollViewer Margin="0,12,0,0" VerticalScrollBarVisibility="Auto">
-                            <StackPanel>
+                            <StackPanel Margin="0,0,12,0">
                                 <Grid Margin="0,0,0,10">
                                     <Grid.ColumnDefinitions>
                                         <ColumnDefinition Width="*" />
@@ -260,24 +399,164 @@
                                     </Grid.RowDefinitions>
 
                                     <TextBlock Text="Helmet" Foreground="{StaticResource MutedBrush}" Margin="0,6" />
-                                    <TextBox x:Name="HelmetBox" Grid.Column="1" Margin="0,2" />
+                                    <ComboBox x:Name="HelmetCombo" Grid.Column="1" Margin="0,2" DisplayMemberPath="DisplayName" />
                                     <TextBlock Grid.Row="1" Text="Cape" Foreground="{StaticResource MutedBrush}" Margin="0,6" />
-                                    <TextBox x:Name="CapeBox" Grid.Row="1" Grid.Column="1" Margin="0,2" />
+                                    <ComboBox x:Name="CapeCombo" Grid.Row="1" Grid.Column="1" Margin="0,2" DisplayMemberPath="DisplayName" />
                                     <TextBlock Grid.Row="2" Text="Body" Foreground="{StaticResource MutedBrush}" Margin="0,6" />
-                                    <TextBox x:Name="BodyBox" Grid.Row="2" Grid.Column="1" Margin="0,2" />
+                                    <ComboBox x:Name="BodyCombo" Grid.Row="2" Grid.Column="1" Margin="0,2" DisplayMemberPath="DisplayName" />
                                     <TextBlock Grid.Row="3" Text="Arm" Foreground="{StaticResource MutedBrush}" Margin="0,6" />
-                                    <TextBox x:Name="ArmBox" Grid.Row="3" Grid.Column="1" Margin="0,2" />
+                                    <ComboBox x:Name="ArmCombo" Grid.Row="3" Grid.Column="1" Margin="0,2" DisplayMemberPath="DisplayName" />
                                     <TextBlock Grid.Row="4" Text="Leg" Foreground="{StaticResource MutedBrush}" Margin="0,6" />
-                                    <TextBox x:Name="LegBox" Grid.Row="4" Grid.Column="1" Margin="0,2" />
+                                    <ComboBox x:Name="LegCombo" Grid.Row="4" Grid.Column="1" Margin="0,2" DisplayMemberPath="DisplayName" />
                                     <TextBlock Grid.Row="5" Text="Item0" Foreground="{StaticResource MutedBrush}" Margin="0,6" />
-                                    <TextBox x:Name="Item0Box" Grid.Row="5" Grid.Column="1" Margin="0,2" />
+                                    <ComboBox x:Name="Item0Combo" Grid.Row="5" Grid.Column="1" Margin="0,2" DisplayMemberPath="DisplayName" />
                                     <TextBlock Grid.Row="6" Text="Item1" Foreground="{StaticResource MutedBrush}" Margin="0,6" />
-                                    <TextBox x:Name="Item1Box" Grid.Row="6" Grid.Column="1" Margin="0,2" />
+                                    <ComboBox x:Name="Item1Combo" Grid.Row="6" Grid.Column="1" Margin="0,2" DisplayMemberPath="DisplayName" />
                                 </Grid>
 
                                 <StackPanel Orientation="Horizontal">
                                     <Button Click="ApplyCustomLoadout_Click" Content="Apply" />
                                     <Button Margin="8,0,0,0" Click="ClearCustomLoadout_Click" Content="Clear" />
+                                </StackPanel>
+                            </StackPanel>
+                        </ScrollViewer>
+                    </TabItem>
+
+                    <TabItem Header="Crafting">
+                        <ScrollViewer Margin="0,12,0,0" VerticalScrollBarVisibility="Auto">
+                            <StackPanel Margin="0,0,12,0">
+                                <Grid Margin="0,0,0,10">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBox x:Name="CraftingPiecesPathBox"
+                                             IsReadOnly="True"
+                                             Text="Select crafting_pieces.xml..." />
+                                    <Button Grid.Column="1"
+                                            Margin="8,0,0,0"
+                                            Click="ChooseCraftingPieces_Click"
+                                            Content="Pieces" />
+                                </Grid>
+
+                                <Grid Margin="0,0,0,10">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBox x:Name="CraftingTemplatesPathBox"
+                                             IsReadOnly="True"
+                                             Text="Optional crafting_templates.xml/xslt..." />
+                                    <Button Grid.Column="1"
+                                            Margin="8,0,0,0"
+                                            Click="ChooseCraftingTemplates_Click"
+                                            Content="Templates" />
+                                </Grid>
+
+                                <TextBlock x:Name="CraftingSummaryText"
+                                           Foreground="{StaticResource MutedBrush}"
+                                           FontSize="12"
+                                           Text="No crafting pieces loaded." />
+
+                                <TextBlock Text="WEAPON TEMPLATE"
+                                           Margin="0,14,0,0"
+                                           Foreground="{StaticResource AccentBrush}"
+                                           FontSize="11"
+                                           FontWeight="Bold" />
+                                <ComboBox x:Name="CraftingTemplateCombo"
+                                          Margin="0,8,0,12"
+                                          IsEditable="False"
+                                          SelectionChanged="CraftingTemplateCombo_SelectionChanged" />
+
+                                <TextBlock Text="PIECES"
+                                           Foreground="{StaticResource AccentBrush}"
+                                           FontSize="11"
+                                           FontWeight="Bold" />
+
+                                <Grid Margin="0,8,0,10">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="82" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                    </Grid.RowDefinitions>
+
+                                    <TextBlock Text="Blade" Foreground="{StaticResource MutedBrush}" Margin="0,6" />
+                                    <TextBox x:Name="CraftingBladeSearch"
+                                             Grid.Column="1"
+                                             Margin="0,2"
+                                             Tag="Blade"
+                                             TextChanged="CraftingPieceSearch_TextChanged" />
+                                    <ComboBox x:Name="CraftingBladeCombo"
+                                              Grid.Row="1"
+                                              Grid.Column="1"
+                                              Margin="0,2,0,8"
+                                              DisplayMemberPath="Id"
+                                              IsEditable="False"
+                                              SelectionChanged="CraftingPieceCombo_SelectionChanged" />
+
+                                    <TextBlock Grid.Row="2" Text="Guard" Foreground="{StaticResource MutedBrush}" Margin="0,6" />
+                                    <TextBox x:Name="CraftingGuardSearch"
+                                             Grid.Row="2"
+                                             Grid.Column="1"
+                                             Margin="0,2"
+                                             Tag="Guard"
+                                             TextChanged="CraftingPieceSearch_TextChanged" />
+                                    <ComboBox x:Name="CraftingGuardCombo"
+                                              Grid.Row="3"
+                                              Grid.Column="1"
+                                              Margin="0,2,0,8"
+                                              DisplayMemberPath="Id"
+                                              IsEditable="False"
+                                              SelectionChanged="CraftingPieceCombo_SelectionChanged" />
+
+                                    <TextBlock Grid.Row="4" Text="Handle" Foreground="{StaticResource MutedBrush}" Margin="0,6" />
+                                    <TextBox x:Name="CraftingHandleSearch"
+                                             Grid.Row="4"
+                                             Grid.Column="1"
+                                             Margin="0,2"
+                                             Tag="Handle"
+                                             TextChanged="CraftingPieceSearch_TextChanged" />
+                                    <ComboBox x:Name="CraftingHandleCombo"
+                                              Grid.Row="5"
+                                              Grid.Column="1"
+                                              Margin="0,2,0,8"
+                                              DisplayMemberPath="Id"
+                                              IsEditable="False"
+                                              SelectionChanged="CraftingPieceCombo_SelectionChanged" />
+
+                                    <TextBlock Grid.Row="6" Text="Pommel" Foreground="{StaticResource MutedBrush}" Margin="0,6" />
+                                    <TextBox x:Name="CraftingPommelSearch"
+                                             Grid.Row="6"
+                                             Grid.Column="1"
+                                             Margin="0,2"
+                                             Tag="Pommel"
+                                             TextChanged="CraftingPieceSearch_TextChanged" />
+                                    <ComboBox x:Name="CraftingPommelCombo"
+                                              Grid.Row="7"
+                                              Grid.Column="1"
+                                              Margin="0,2"
+                                              DisplayMemberPath="Id"
+                                              IsEditable="False"
+                                              SelectionChanged="CraftingPieceCombo_SelectionChanged" />
+                                </Grid>
+
+                                <TextBlock x:Name="CraftingWeaponLengthText"
+                                           Foreground="{StaticResource MutedBrush}"
+                                           FontSize="12"
+                                           Text="Weapon length: -" />
+
+                                <StackPanel Orientation="Horizontal" Margin="0,10,0,0">
+                                    <Button Click="ApplyCraftingWeapon_Click" Content="Apply" />
+                                    <Button Margin="8,0,0,0" Click="ClearCraftingWeapon_Click" Content="Clear" />
                                 </StackPanel>
                             </StackPanel>
                         </ScrollViewer>

@@ -1,7 +1,10 @@
 using System.Collections.ObjectModel;
+using System.Globalization;
 using System.IO;
+using System.Text.RegularExpressions;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Media3D;
@@ -14,8 +17,44 @@ namespace LOTRAOM_Viewport;
 public partial class MainWindow : Window
 {
     private static readonly string[] EquipmentSlots = ["Helmet", "Cape", "Body", "Arm", "Leg", "Item0", "Item1"];
+    private static readonly string[] CraftingSlots = ["Blade", "Guard", "Handle", "Pommel"];
+    private static readonly (string Type, int Order)[] DefaultCraftingBuildOrder =
+        [("Handle", 0), ("Guard", 1), ("Blade", 2), ("Pommel", -1)];
+    private static readonly (string Type, int Order)[] AxeMaceCraftingBuildOrder =
+        [("Handle", 0), ("Blade", 1), ("Pommel", -1)];
+    private static readonly Dictionary<string, (string Type, int Order)[]> BundledCraftingBuildOrders =
+        new(StringComparer.OrdinalIgnoreCase)
+        {
+            ["OneHandedSword"] = DefaultCraftingBuildOrder,
+            ["TwoHandedSword"] = DefaultCraftingBuildOrder,
+            ["Dagger"] = DefaultCraftingBuildOrder,
+            ["ThrowingKnife"] = DefaultCraftingBuildOrder,
+            ["TwoHandedPolearm"] = DefaultCraftingBuildOrder,
+            ["Pike"] = DefaultCraftingBuildOrder,
+            ["Javelin"] = DefaultCraftingBuildOrder,
+            ["OneHandedAxe"] = AxeMaceCraftingBuildOrder,
+            ["TwoHandedAxe"] = AxeMaceCraftingBuildOrder,
+            ["Mace"] = AxeMaceCraftingBuildOrder,
+            ["TwoHandedMace"] = AxeMaceCraftingBuildOrder,
+            ["ThrowingAxe"] = [("Handle", 0), ("Blade", 1)]
+        };
     private readonly ObservableCollection<TpacPackageNode> _packages = [];
+    private readonly ObservableCollection<MeshAssetNode> _assetSearchResults = [];
+    private readonly List<TpacPackageNode> _allPackages = [];
     private readonly ObservableCollection<TroopNode> _troops = [];
+    private readonly ObservableCollection<MeshAssetNode> _meshOptions = [];
+    private readonly ObservableCollection<CraftingPieceNode> _craftingPieces = [];
+    private readonly Dictionary<string, HashSet<string>> _craftingTemplatePieceIds = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, (string Type, int Order)[]> _craftingTemplateBuildOrders = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, string> _craftingSearchText = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<ComboBox, ObservableCollection<MeshAssetNode>> _filteredMeshOptions = [];
+    private readonly Dictionary<TextBox, ComboBox> _equipmentTextBoxes = [];
+    private bool _isUpdatingComboFilters;
+    private bool _isUpdatingCraftingCombos;
+    private CraftingPieceNode? _craftingBlade;
+    private CraftingPieceNode? _craftingGuard;
+    private CraftingPieceNode? _craftingHandle;
+    private CraftingPieceNode? _craftingPommel;
     private readonly Model3DGroup _scene = new();
     private readonly Model3DGroup _assetModel = new();
     private Point _lastMousePosition;
@@ -30,6 +69,7 @@ public partial class MainWindow : Window
 
         AssetTree.ItemsSource = _packages;
         TroopList.ItemsSource = _troops;
+        BindEquipmentDropdowns();
         ModelViewport.Children.Add(new ModelVisual3D { Content = _scene });
         ResetScene();
         RenderEmptyPreview();
@@ -55,6 +95,7 @@ public partial class MainWindow : Window
     {
         AssetPathBox.Text = folderPath;
         _packages.Clear();
+        _allPackages.Clear();
 
         if (!Directory.Exists(folderPath))
         {
@@ -81,11 +122,13 @@ public partial class MainWindow : Window
 
             PopulatePackageAssets(package, info);
 
-            _packages.Add(package);
+            _allPackages.Add(package);
         }
 
+        ApplyAssetSearchFilter();
         PackageCountText.Text = _packages.Count.ToString();
         MeshCountText.Text = _packages.Sum(package => package.Assets.Count).ToString();
+        RefreshMeshOptions();
         ExtractorStatusText.Text = _packages.Count == 0 ? "not loaded" : "TpacTool.Lib";
         ScanSummaryText.Text = _packages.Count == 0
             ? "No .tpac files found in this folder."
@@ -105,6 +148,151 @@ public partial class MainWindow : Window
         }
     }
 
+    private void AssetSearchBox_TextChanged(object sender, TextChangedEventArgs e)
+    {
+        ApplyAssetSearchFilter();
+        MeshCountText.Text = string.IsNullOrWhiteSpace(AssetSearchBox.Text)
+            ? _packages.Sum(package => package.Assets.Count).ToString()
+            : _assetSearchResults.Count.ToString();
+    }
+
+    private void ApplyAssetSearchFilter()
+    {
+        var query = AssetSearchBox?.Text?.Trim() ?? string.Empty;
+
+        if (string.IsNullOrWhiteSpace(query))
+        {
+            AssetTree.ItemsSource = _packages;
+            _packages.Clear();
+            foreach (var package in _allPackages)
+            {
+                _packages.Add(package);
+            }
+
+            return;
+        }
+
+        AssetTree.ItemsSource = _assetSearchResults;
+        _packages.Clear();
+        _assetSearchResults.Clear();
+
+        foreach (var asset in _allPackages
+                     .SelectMany(package => package.Assets)
+                     .Where(asset =>
+                         asset.Kind == "Mesh" &&
+                         asset.DisplayName.Contains(query, StringComparison.OrdinalIgnoreCase))
+                     .OrderBy(asset => asset.DisplayName))
+            {
+                _assetSearchResults.Add(asset);
+            }
+    }
+
+    private void BindEquipmentDropdowns()
+    {
+        foreach (var comboBox in GetEquipmentCombos())
+        {
+            var filteredOptions = new ObservableCollection<MeshAssetNode>();
+            _filteredMeshOptions[comboBox] = filteredOptions;
+            comboBox.ItemsSource = filteredOptions;
+            comboBox.IsEditable = true;
+            comboBox.IsTextSearchEnabled = false;
+            comboBox.StaysOpenOnEdit = true;
+            TextSearch.SetTextPath(comboBox, nameof(MeshAssetNode.DisplayName));
+            comboBox.Loaded += EquipmentCombo_Loaded;
+            comboBox.DropDownOpened += EquipmentCombo_DropDownOpened;
+        }
+    }
+
+    private void EquipmentCombo_Loaded(object sender, RoutedEventArgs e)
+    {
+        if (sender is ComboBox comboBox)
+        {
+            AttachEquipmentComboTextBox(comboBox);
+        }
+    }
+
+    private void RefreshMeshOptions()
+    {
+        var currentValues = ReadEquipmentBoxes();
+        _meshOptions.Clear();
+
+        foreach (var mesh in _packages
+                     .SelectMany(package => package.Assets)
+                     .Where(asset => asset.Kind == "Mesh")
+                     .OrderBy(asset => asset.DisplayName))
+        {
+            _meshOptions.Add(mesh);
+        }
+
+        foreach (var comboBox in GetEquipmentCombos())
+        {
+            FilterEquipmentCombo(comboBox, comboBox.Text);
+        }
+
+        SetEquipmentBoxes(currentValues);
+    }
+
+    private void EquipmentCombo_DropDownOpened(object? sender, EventArgs e)
+    {
+        if (sender is ComboBox comboBox)
+        {
+            AttachEquipmentComboTextBox(comboBox);
+            FilterEquipmentCombo(comboBox, comboBox.Text);
+        }
+    }
+
+    private void EquipmentCombo_TextChanged(object sender, TextChangedEventArgs e)
+    {
+        if (_isUpdatingComboFilters ||
+            sender is not TextBox textBox ||
+            !_equipmentTextBoxes.TryGetValue(textBox, out var comboBox))
+        {
+            return;
+        }
+
+        FilterEquipmentCombo(comboBox, textBox.Text);
+        if (comboBox.IsKeyboardFocusWithin)
+        {
+            comboBox.IsDropDownOpen = true;
+        }
+    }
+
+    private void AttachEquipmentComboTextBox(ComboBox comboBox)
+    {
+        comboBox.ApplyTemplate();
+        if (comboBox.Template.FindName("PART_EditableTextBox", comboBox) is not TextBox textBox ||
+            _equipmentTextBoxes.ContainsKey(textBox))
+        {
+            return;
+        }
+
+        _equipmentTextBoxes[textBox] = comboBox;
+        textBox.TextChanged += EquipmentCombo_TextChanged;
+    }
+
+    private void FilterEquipmentCombo(ComboBox comboBox, string? searchText)
+    {
+        if (!_filteredMeshOptions.TryGetValue(comboBox, out var filteredOptions))
+        {
+            return;
+        }
+
+        var needle = searchText?.Trim() ?? string.Empty;
+        var matches = string.IsNullOrWhiteSpace(needle)
+            ? _meshOptions.Take(250)
+            : _meshOptions
+                .Where(option => option.DisplayName.Contains(needle, StringComparison.OrdinalIgnoreCase))
+                .Take(250);
+
+        _isUpdatingComboFilters = true;
+        filteredOptions.Clear();
+        foreach (var match in matches)
+        {
+            filteredOptions.Add(match);
+        }
+        _isUpdatingComboFilters = false;
+    }
+
     private void ChooseTroopXml_Click(object sender, RoutedEventArgs e)
     {
         var dialog = new OpenFileDialog
@@ -120,6 +308,532 @@ public partial class MainWindow : Window
         }
 
         LoadTroopXml(dialog.FileName);
+    }
+
+    private void ChooseCraftingPieces_Click(object sender, RoutedEventArgs e)
+    {
+        var dialog = new OpenFileDialog
+        {
+            Title = "Select Bannerlord crafting_pieces.xml",
+            Filter = "XML files (*.xml)|*.xml|All files (*.*)|*.*",
+            Multiselect = false
+        };
+
+        if (dialog.ShowDialog(this) == true)
+        {
+            LoadCraftingPieces(dialog.FileName);
+        }
+    }
+
+    private void ChooseCraftingTemplates_Click(object sender, RoutedEventArgs e)
+    {
+        var dialog = new OpenFileDialog
+        {
+            Title = "Select Bannerlord crafting_templates.xml or XSLT",
+            Filter = "XML/XSLT files (*.xml;*.xslt)|*.xml;*.xslt|All files (*.*)|*.*",
+            Multiselect = false
+        };
+
+        if (dialog.ShowDialog(this) == true)
+        {
+            LoadCraftingTemplates(dialog.FileName);
+        }
+    }
+
+    private void LoadCraftingPieces(string filePath)
+    {
+        CraftingPiecesPathBox.Text = filePath;
+        _craftingPieces.Clear();
+        ClearCraftingSelections();
+
+        try
+        {
+            var document = XDocument.Load(filePath);
+            var pieces = document
+                .Descendants()
+                .Where(element => element.Name.LocalName.Equals("CraftingPiece", StringComparison.OrdinalIgnoreCase))
+                .Select(ParseCraftingPiece)
+                .Where(piece => piece != null)
+                .Cast<CraftingPieceNode>()
+                .GroupBy(piece => piece.Id, StringComparer.OrdinalIgnoreCase)
+                .Select(group => group.First())
+                .OrderBy(piece => piece.Id)
+                .ToArray();
+
+            foreach (var piece in pieces)
+            {
+                _craftingPieces.Add(piece);
+            }
+
+            RefreshCraftingTemplates();
+            RefreshCraftingPieceCombos();
+            CraftingSummaryText.Text = _craftingPieces.Count == 0
+                ? "No CraftingPiece entries found."
+                : $"Loaded {_craftingPieces.Count} crafting piece(s).";
+            SelectedAssetTitle.Text = "Crafting pieces loaded";
+            SelectedAssetSubtitle.Text = "Pick weapon pieces to render them from loaded TPAC meshes.";
+        }
+        catch (Exception ex)
+        {
+            CraftingSummaryText.Text = $"Could not load crafting pieces: {ex.Message}";
+        }
+    }
+
+    private void LoadCraftingTemplates(string filePath)
+    {
+        CraftingTemplatesPathBox.Text = filePath;
+        _craftingTemplatePieceIds.Clear();
+        _craftingTemplateBuildOrders.Clear();
+
+        try
+        {
+            var document = XDocument.Load(filePath);
+            XNamespace xsl = "http://www.w3.org/1999/XSL/Transform";
+
+            foreach (var template in document.Descendants(xsl + "template"))
+            {
+                var match = template.Attribute("match")?.Value ?? string.Empty;
+                var idMatch = Regex.Match(match, @"CraftingTemplate\[@id='([^']+)'\]");
+                if (!idMatch.Success)
+                {
+                    continue;
+                }
+
+                var templateId = idMatch.Groups[1].Value;
+                var ids = template.Descendants()
+                    .Where(element => element.Name.LocalName is "UsablePiece" or "AvailablePiece")
+                    .Select(element => GetAttributeValue(element, "piece_id") ?? GetAttributeValue(element, "id"))
+                    .Where(value => !string.IsNullOrWhiteSpace(value))
+                    .Select(value => value!)
+                    .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+                _craftingTemplatePieceIds[templateId] = ids;
+            }
+
+            foreach (var template in document.Descendants()
+                         .Where(element => element.Name.LocalName.Equals("CraftingTemplate", StringComparison.OrdinalIgnoreCase)))
+            {
+                var templateId = GetAttributeValue(template, "id");
+                if (string.IsNullOrWhiteSpace(templateId))
+                {
+                    continue;
+                }
+
+                var ids = template.Descendants()
+                    .Where(element => element.Name.LocalName is "UsablePiece" or "AvailablePiece")
+                    .Select(element => GetAttributeValue(element, "piece_id") ?? GetAttributeValue(element, "id"))
+                    .Where(value => !string.IsNullOrWhiteSpace(value))
+                    .Select(value => value!)
+                    .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+                if (ids.Count > 0)
+                {
+                    _craftingTemplatePieceIds[templateId] = ids;
+                }
+
+                var order = template.Descendants()
+                    .Where(element => element.Name.LocalName.Equals("PieceData", StringComparison.OrdinalIgnoreCase))
+                    .Select(element => (
+                        Type: GetAttributeValue(element, "piece_type") ?? string.Empty,
+                        Order: int.TryParse(GetAttributeValue(element, "build_order"), NumberStyles.Integer, CultureInfo.InvariantCulture, out var orderValue)
+                            ? orderValue
+                            : 0))
+                    .Where(item => !string.IsNullOrWhiteSpace(item.Type))
+                    .ToArray();
+
+                if (order.Length > 0)
+                {
+                    _craftingTemplateBuildOrders[templateId] = order;
+                }
+            }
+
+            RefreshCraftingTemplates();
+            RefreshCraftingPieceCombos();
+            CraftingSummaryText.Text = $"Loaded {_craftingTemplatePieceIds.Count} crafting template filter(s).";
+        }
+        catch (Exception ex)
+        {
+            CraftingSummaryText.Text = $"Could not load crafting templates: {ex.Message}";
+        }
+    }
+
+    private void RefreshCraftingTemplates()
+    {
+        var selected = CraftingTemplateCombo.SelectedItem as string;
+        CraftingTemplateCombo.Items.Clear();
+        CraftingTemplateCombo.Items.Add("(All pieces)");
+
+        foreach (var template in BundledCraftingBuildOrders.Keys
+                     .Concat(_craftingTemplatePieceIds.Keys)
+                     .Concat(_craftingTemplateBuildOrders.Keys)
+                     .Distinct(StringComparer.OrdinalIgnoreCase)
+                     .OrderBy(value => value))
+        {
+            CraftingTemplateCombo.Items.Add(template);
+        }
+
+        CraftingTemplateCombo.SelectedItem = selected != null && CraftingTemplateCombo.Items.Contains(selected)
+            ? selected
+            : "(All pieces)";
+    }
+
+    private void RefreshCraftingPieceCombos()
+    {
+        var previous = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["Blade"] = _craftingBlade?.Id,
+            ["Guard"] = _craftingGuard?.Id,
+            ["Handle"] = _craftingHandle?.Id,
+            ["Pommel"] = _craftingPommel?.Id
+        };
+
+        _isUpdatingCraftingCombos = true;
+        PopulateCraftingCombo(CraftingBladeCombo, "Blade");
+        PopulateCraftingCombo(CraftingGuardCombo, "Guard");
+        PopulateCraftingCombo(CraftingHandleCombo, "Handle");
+        PopulateCraftingCombo(CraftingPommelCombo, "Pommel");
+        _craftingBlade = RestoreCraftingSelection(CraftingBladeCombo, previous["Blade"]);
+        _craftingGuard = RestoreCraftingSelection(CraftingGuardCombo, previous["Guard"]);
+        _craftingHandle = RestoreCraftingSelection(CraftingHandleCombo, previous["Handle"]);
+        _craftingPommel = RestoreCraftingSelection(CraftingPommelCombo, previous["Pommel"]);
+        _isUpdatingCraftingCombos = false;
+    }
+
+    private void PopulateCraftingCombo(ComboBox comboBox, string slot)
+    {
+        comboBox.Items.Clear();
+        comboBox.Items.Add(CraftingPieceNode.Empty);
+
+        foreach (var piece in FilterCraftingPieces(slot))
+        {
+            comboBox.Items.Add(piece);
+        }
+
+        comboBox.SelectedIndex = 0;
+    }
+
+    private IEnumerable<CraftingPieceNode> FilterCraftingPieces(string slot)
+    {
+        HashSet<string>? allowedIds = null;
+        if (CraftingTemplateCombo.SelectedItem is string templateId &&
+            !templateId.Equals("(All pieces)", StringComparison.OrdinalIgnoreCase) &&
+            _craftingTemplatePieceIds.TryGetValue(templateId, out var templateIds))
+        {
+            allowedIds = templateIds;
+        }
+
+        _craftingSearchText.TryGetValue(slot, out var searchText);
+        return _craftingPieces
+            .Where(piece => piece.PieceType.Equals(slot, StringComparison.OrdinalIgnoreCase))
+            .Where(piece => allowedIds == null || allowedIds.Contains(piece.Id))
+            .Where(piece => string.IsNullOrWhiteSpace(searchText) ||
+                            piece.Id.Contains(searchText, StringComparison.OrdinalIgnoreCase) ||
+                            piece.MeshName.Contains(searchText, StringComparison.OrdinalIgnoreCase))
+            .OrderBy(piece => piece.Id);
+    }
+
+    private static CraftingPieceNode? RestoreCraftingSelection(ComboBox comboBox, string? selectedId)
+    {
+        if (string.IsNullOrWhiteSpace(selectedId))
+        {
+            return null;
+        }
+
+        foreach (var item in comboBox.Items.OfType<CraftingPieceNode>())
+        {
+            if (item.Id.Equals(selectedId, StringComparison.OrdinalIgnoreCase))
+            {
+                comboBox.SelectedItem = item;
+                return item;
+            }
+        }
+
+        return null;
+    }
+
+    private void CraftingTemplateCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_isUpdatingCraftingCombos)
+        {
+            return;
+        }
+
+        RefreshCraftingPieceCombos();
+        RenderCraftingWeaponPreview();
+    }
+
+    private void CraftingPieceSearch_TextChanged(object sender, TextChangedEventArgs e)
+    {
+        if (sender is TextBox textBox && textBox.Tag is string slot)
+        {
+            _craftingSearchText[slot] = textBox.Text;
+            RefreshCraftingPieceCombos();
+        }
+    }
+
+    private void CraftingPieceCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_isUpdatingCraftingCombos || sender is not ComboBox comboBox)
+        {
+            return;
+        }
+
+        var selected = comboBox.SelectedItem as CraftingPieceNode;
+        if (selected == CraftingPieceNode.Empty)
+        {
+            selected = null;
+        }
+
+        if (comboBox == CraftingBladeCombo)
+        {
+            _craftingBlade = selected;
+        }
+        else if (comboBox == CraftingGuardCombo)
+        {
+            _craftingGuard = selected;
+        }
+        else if (comboBox == CraftingHandleCombo)
+        {
+            _craftingHandle = selected;
+        }
+        else if (comboBox == CraftingPommelCombo)
+        {
+            _craftingPommel = selected;
+        }
+
+        RenderCraftingWeaponPreview();
+    }
+
+    private void ApplyCraftingWeapon_Click(object sender, RoutedEventArgs e)
+    {
+        RenderCraftingWeaponPreview();
+    }
+
+    private void ClearCraftingWeapon_Click(object sender, RoutedEventArgs e)
+    {
+        ClearCraftingSelections();
+        RenderCraftingWeaponPreview();
+    }
+
+    private void ClearCraftingSelections()
+    {
+        _craftingBlade = null;
+        _craftingGuard = null;
+        _craftingHandle = null;
+        _craftingPommel = null;
+
+        if (CraftingBladeCombo != null)
+        {
+            CraftingBladeCombo.SelectedIndex = 0;
+            CraftingGuardCombo.SelectedIndex = 0;
+            CraftingHandleCombo.SelectedIndex = 0;
+            CraftingPommelCombo.SelectedIndex = 0;
+        }
+    }
+
+    private void RenderCraftingWeaponPreview()
+    {
+        _assetModel.Children.Clear();
+
+        var pieces = new[]
+        {
+            ("Blade", _craftingBlade),
+            ("Guard", _craftingGuard),
+            ("Handle", _craftingHandle),
+            ("Pommel", _craftingPommel)
+        };
+
+        var selectedPieces = pieces.Where(item => item.Item2 != null).ToArray();
+        if (selectedPieces.Length == 0)
+        {
+            SelectedAssetTitle.Text = "Crafting weapon";
+            SelectedAssetSubtitle.Text = "Select weapon pieces to preview.";
+            CraftingWeaponLengthText.Text = "Weapon length: -";
+            return;
+        }
+
+        var pivots = CalculateCraftingPivots(out var weaponLength);
+        var rendered = 0;
+        var missing = 0;
+
+        foreach (var (slot, piece) in selectedPieces)
+        {
+            if (piece == null ||
+                !pivots.TryGetValue(slot, out var pivot) ||
+                float.IsNaN(pivot))
+            {
+                continue;
+            }
+
+            var meshAsset = FindMeshOption(piece.MeshName);
+            if (meshAsset == null)
+            {
+                missing++;
+                continue;
+            }
+
+            try
+            {
+                var model = LoadMeshModel(meshAsset, out _);
+                model.Transform = new TranslateTransform3D(0, pivot * 0.035, 0);
+                _assetModel.Children.Add(model);
+                rendered++;
+            }
+            catch
+            {
+                missing++;
+            }
+        }
+
+        CraftingWeaponLengthText.Text = float.IsNaN(weaponLength)
+            ? "Weapon length: -"
+            : $"Weapon length: {weaponLength:0.##}";
+        SelectedAssetTitle.Text = "Crafting weapon";
+        SelectedAssetSubtitle.Text = rendered == 0
+            ? "No selected crafting piece meshes could be rendered from loaded TPAC assets."
+            : $"Rendered {rendered} piece(s)" + (missing == 0 ? "." : $"; {missing} mesh match(es) missing.");
+    }
+
+    private Dictionary<string, float> CalculateCraftingPivots(out float weaponLength)
+    {
+        var selectedByType = new Dictionary<string, CraftingPieceNode?>
+        {
+            ["Blade"] = _craftingBlade,
+            ["Guard"] = _craftingGuard,
+            ["Handle"] = _craftingHandle,
+            ["Pommel"] = _craftingPommel
+        };
+
+        var pivots = new Dictionary<string, float>(StringComparer.OrdinalIgnoreCase);
+        var bottom = 0f;
+        var top = 0f;
+
+        foreach (var (type, order) in GetCraftingBuildOrder())
+        {
+            var piece = selectedByType.TryGetValue(type, out var selected) ? selected : null;
+            if (piece == null)
+            {
+                pivots[type] = float.NaN;
+                continue;
+            }
+
+            var sign = Math.Sign(order);
+            if (sign == 0)
+            {
+                top += piece.ScaledPieceOffset;
+                bottom -= piece.ScaledPieceOffset;
+            }
+            else if (sign < 0)
+            {
+                bottom += piece.ScaledDistanceToNextPiece + piece.ScaledPieceOffset - piece.ScaledNextPieceOffset;
+            }
+            else
+            {
+                top += piece.ScaledDistanceToPreviousPiece + piece.ScaledPieceOffset - piece.ScaledPreviousPieceOffset;
+            }
+
+            pivots[type] = sign * (sign < 0 ? bottom : top) + (sign == 0 ? piece.ScaledPieceOffset : 0f);
+
+            if (sign == 0)
+            {
+                bottom += piece.ScaledDistanceToPreviousPiece - piece.ScaledPreviousPieceOffset;
+                top += piece.ScaledDistanceToNextPiece - piece.ScaledNextPieceOffset;
+            }
+            else if (sign < 0)
+            {
+                bottom += piece.ScaledDistanceToPreviousPiece - piece.ScaledPreviousPieceOffset;
+            }
+            else
+            {
+                top += piece.ScaledDistanceToNextPiece - piece.ScaledNextPieceOffset;
+            }
+        }
+
+        weaponLength = float.NaN;
+        if (_craftingBlade != null && pivots.TryGetValue("Blade", out var bladePivot) && !float.IsNaN(bladePivot))
+        {
+            var maxPieceReach = new[] { _craftingBlade, _craftingGuard, _craftingHandle, _craftingPommel }
+                .Where(piece => piece != null)
+                .Select(piece => piece!.ScaledDistanceToNextPiece + piece.ScaledPieceOffset)
+                .DefaultIfEmpty(0)
+                .Max();
+            weaponLength = MathF.Max(bladePivot + _craftingBlade.ScaledDistanceToNextPiece, maxPieceReach);
+        }
+
+        return pivots;
+    }
+
+    private (string Type, int Order)[] GetCraftingBuildOrder()
+    {
+        if (CraftingTemplateCombo.SelectedItem is string templateId &&
+            !templateId.Equals("(All pieces)", StringComparison.OrdinalIgnoreCase))
+        {
+            if (_craftingTemplateBuildOrders.TryGetValue(templateId, out var loaded))
+            {
+                return loaded;
+            }
+
+            if (BundledCraftingBuildOrders.TryGetValue(templateId, out var bundled))
+            {
+                return bundled;
+            }
+        }
+
+        return DefaultCraftingBuildOrder;
+    }
+
+    private static CraftingPieceNode? ParseCraftingPiece(XElement element)
+    {
+        var id = GetAttributeValue(element, "id");
+        var pieceType = GetAttributeValue(element, "piece_type");
+        if (string.IsNullOrWhiteSpace(id) || string.IsNullOrWhiteSpace(pieceType))
+        {
+            return null;
+        }
+
+        var lengthParsed = TryFloat(GetAttributeValue(element, "length"), out var length);
+        if (lengthParsed)
+        {
+            return CreateCraftingPiece(element, id, pieceType, length, length / 2f, length / 2f);
+        }
+
+        TryFloat(GetAttributeValue(element, "distance_to_next_piece"), out var distanceToNext);
+        TryFloat(GetAttributeValue(element, "distance_to_previous_piece"), out var distanceToPrevious);
+        return CreateCraftingPiece(element, id, pieceType, distanceToNext + distanceToPrevious, distanceToNext, distanceToPrevious);
+    }
+
+    private static CraftingPieceNode CreateCraftingPiece(
+        XElement element,
+        string id,
+        string pieceType,
+        float length,
+        float distanceToNext,
+        float distanceToPrevious)
+    {
+        var buildData = element.Elements().FirstOrDefault(child => child.Name.LocalName.Equals("BuildData", StringComparison.OrdinalIgnoreCase));
+        return new CraftingPieceNode
+        {
+            Id = id,
+            PieceType = pieceType,
+            MeshName = GetAttributeValue(element, "mesh") ?? id,
+            Length = length,
+            DistanceToNextPiece = distanceToNext,
+            DistanceToPreviousPiece = distanceToPrevious,
+            PieceOffset = ReadBuildDataFloat(buildData, "piece_offset"),
+            PreviousPieceOffset = ReadBuildDataFloat(buildData, "previous_piece_offset"),
+            NextPieceOffset = ReadBuildDataFloat(buildData, "next_piece_offset")
+        };
+    }
+
+    private static float ReadBuildDataFloat(XElement? buildData, string attributeName)
+    {
+        TryFloat(buildData == null ? null : GetAttributeValue(buildData, attributeName), out var value);
+        return value;
+    }
+
+    private static bool TryFloat(string? value, out float parsed)
+    {
+        return float.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out parsed);
     }
 
     private void LoadTroopXml(string filePath)
@@ -272,25 +986,49 @@ public partial class MainWindow : Window
     private Dictionary<string, string> ReadEquipmentBoxes()
     {
         var loadout = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        AddSlotValue(loadout, "Helmet", HelmetBox.Text);
-        AddSlotValue(loadout, "Cape", CapeBox.Text);
-        AddSlotValue(loadout, "Body", BodyBox.Text);
-        AddSlotValue(loadout, "Arm", ArmBox.Text);
-        AddSlotValue(loadout, "Leg", LegBox.Text);
-        AddSlotValue(loadout, "Item0", Item0Box.Text);
-        AddSlotValue(loadout, "Item1", Item1Box.Text);
+        AddSlotValue(loadout, "Helmet", GetComboValue(HelmetCombo));
+        AddSlotValue(loadout, "Cape", GetComboValue(CapeCombo));
+        AddSlotValue(loadout, "Body", GetComboValue(BodyCombo));
+        AddSlotValue(loadout, "Arm", GetComboValue(ArmCombo));
+        AddSlotValue(loadout, "Leg", GetComboValue(LegCombo));
+        AddSlotValue(loadout, "Item0", GetComboValue(Item0Combo));
+        AddSlotValue(loadout, "Item1", GetComboValue(Item1Combo));
         return loadout;
     }
 
     private void SetEquipmentBoxes(IReadOnlyDictionary<string, string> loadout)
     {
-        HelmetBox.Text = GetSlotValue(loadout, "Helmet");
-        CapeBox.Text = GetSlotValue(loadout, "Cape");
-        BodyBox.Text = GetSlotValue(loadout, "Body");
-        ArmBox.Text = GetSlotValue(loadout, "Arm");
-        LegBox.Text = GetSlotValue(loadout, "Leg");
-        Item0Box.Text = GetSlotValue(loadout, "Item0");
-        Item1Box.Text = GetSlotValue(loadout, "Item1");
+        SetComboValue(HelmetCombo, GetSlotValue(loadout, "Helmet"));
+        SetComboValue(CapeCombo, GetSlotValue(loadout, "Cape"));
+        SetComboValue(BodyCombo, GetSlotValue(loadout, "Body"));
+        SetComboValue(ArmCombo, GetSlotValue(loadout, "Arm"));
+        SetComboValue(LegCombo, GetSlotValue(loadout, "Leg"));
+        SetComboValue(Item0Combo, GetSlotValue(loadout, "Item0"));
+        SetComboValue(Item1Combo, GetSlotValue(loadout, "Item1"));
+    }
+
+    private IEnumerable<ComboBox> GetEquipmentCombos()
+    {
+        yield return HelmetCombo;
+        yield return CapeCombo;
+        yield return BodyCombo;
+        yield return ArmCombo;
+        yield return LegCombo;
+        yield return Item0Combo;
+        yield return Item1Combo;
+    }
+
+    private static string GetComboValue(ComboBox comboBox)
+    {
+        return comboBox.SelectedItem is MeshAssetNode mesh
+            ? mesh.DisplayName
+            : comboBox.Text;
+    }
+
+    private static void SetComboValue(ComboBox comboBox, string value)
+    {
+        comboBox.SelectedItem = null;
+        comboBox.Text = value;
     }
 
     private static void AddSlotValue(IDictionary<string, string> loadout, string slot, string? value)
@@ -310,53 +1048,54 @@ public partial class MainWindow : Window
     {
         _assetModel.Children.Clear();
 
-        _assetModel.Children.Add(CreateBox(new Point3D(0, 0.03, 0), 2.1, 0.06, 2.1, Color.FromRgb(21, 25, 30)));
-        _assetModel.Children.Add(CreateBox(new Point3D(0, 0.9, 0), 0.58, 1.25, 0.36, ResolveLoadoutColor(loadout, "Body", Color.FromRgb(92, 98, 104))));
-        _assetModel.Children.Add(CreateSphere(new Point3D(0, 1.65, 0), 0.24, Color.FromRgb(128, 132, 128)));
-
-        if (loadout.ContainsKey("Helmet"))
+        if (loadout.Count == 0)
         {
-            _assetModel.Children.Add(CreateBox(new Point3D(0, 1.92, 0), 0.42, 0.26, 0.36, ResolveLoadoutColor(loadout, "Helmet", Color.FromRgb(145, 150, 150))));
+            SelectedAssetTitle.Text = title;
+            SelectedAssetSubtitle.Text = "No equipment selected.";
+            return;
         }
 
-        if (loadout.ContainsKey("Cape"))
+        var renderedSlots = new List<string>();
+        var missingSlots = new List<string>();
+        foreach (var slot in EquipmentSlots)
         {
-            _assetModel.Children.Add(CreateBox(new Point3D(0, 0.95, 0.25), 0.74, 1.25, 0.08, ResolveLoadoutColor(loadout, "Cape", Color.FromRgb(72, 68, 76))));
-        }
+            if (!loadout.TryGetValue(slot, out var meshName))
+            {
+                continue;
+            }
 
-        if (loadout.ContainsKey("Arm"))
-        {
-            var color = ResolveLoadoutColor(loadout, "Arm", Color.FromRgb(112, 118, 124));
-            _assetModel.Children.Add(CreateBox(new Point3D(-0.47, 1.02, 0), 0.18, 0.82, 0.18, color, -12));
-            _assetModel.Children.Add(CreateBox(new Point3D(0.47, 1.02, 0), 0.18, 0.82, 0.18, color, 12));
-        }
+            var meshAsset = FindMeshOption(meshName);
+            if (meshAsset == null)
+            {
+                missingSlots.Add(slot);
+                continue;
+            }
 
-        if (loadout.ContainsKey("Leg"))
-        {
-            var color = ResolveLoadoutColor(loadout, "Leg", Color.FromRgb(70, 78, 86));
-            _assetModel.Children.Add(CreateBox(new Point3D(-0.17, 0.25, 0), 0.18, 0.62, 0.18, color));
-            _assetModel.Children.Add(CreateBox(new Point3D(0.17, 0.25, 0), 0.18, 0.62, 0.18, color));
-        }
-
-        if (loadout.ContainsKey("Item0"))
-        {
-            _assetModel.Children.Add(CreateBox(new Point3D(-0.82, 0.95, -0.1), 0.08, 1.25, 0.08, ResolveLoadoutColor(loadout, "Item0", Color.FromRgb(94, 84, 68)), -18));
-        }
-
-        if (loadout.ContainsKey("Item1"))
-        {
-            _assetModel.Children.Add(CreateBox(new Point3D(0.82, 0.95, -0.04), 0.16, 1.0, 0.48, ResolveLoadoutColor(loadout, "Item1", Color.FromRgb(42, 48, 56)), 8));
+            try
+            {
+                var model = LoadMeshModel(meshAsset, out _);
+                _assetModel.Children.Add(model);
+                renderedSlots.Add(slot);
+            }
+            catch
+            {
+                missingSlots.Add(slot);
+            }
         }
 
         SelectedAssetTitle.Text = title;
-        SelectedAssetSubtitle.Text = loadout.Count == 0
-            ? "No equipment selected."
-            : $"{loadout.Count} equipment slot(s) populated.";
+        SelectedAssetSubtitle.Text = renderedSlots.Count == 0
+            ? "No selected loadout meshes could be rendered."
+            : $"Rendered {renderedSlots.Count} slot(s)" +
+              (missingSlots.Count == 0 ? "." : $"; {missingSlots.Count} unresolved.");
     }
 
-    private static Color ResolveLoadoutColor(IReadOnlyDictionary<string, string> loadout, string slot, Color fallback)
+    private MeshAssetNode? FindMeshOption(string meshName)
     {
-        return loadout.TryGetValue(slot, out var value) ? ColorFromName(value) : fallback;
+        var normalizedMeshName = NormalizeMeshDisplayName(meshName);
+        return _meshOptions.FirstOrDefault(option =>
+            option.DisplayName.Equals(meshName, StringComparison.OrdinalIgnoreCase) ||
+            option.DisplayName.Equals(normalizedMeshName, StringComparison.OrdinalIgnoreCase));
     }
 
     private static void PopulatePackageAssets(TpacPackageNode package, FileInfo info)
@@ -518,20 +1257,7 @@ public partial class MainWindow : Window
 
         try
         {
-            var package = new AssetPackage(asset.SourcePath, loadHeaderNow: true, loadDataNow: false);
-            var metamesh = package.Items.OfType<Metamesh>().FirstOrDefault(item => item.Guid == asset.MetameshGuid);
-            var mesh = metamesh?.Meshes.FirstOrDefault(item => item.Guid == asset.MeshGuid);
-
-            if (mesh?.VertexStream == null && mesh?.EditData == null)
-            {
-                _assetModel.Children.Clear();
-                SelectedAssetSubtitle.Text = $"{asset.Kind} - {asset.PackageName} - mesh has no renderable geometry stream";
-                return;
-            }
-
-            var model = mesh.VertexStream != null
-                ? CreateTpacMeshModel(mesh.VertexStream.Data, asset.DisplayName, out var renderedVertices)
-                : CreateTpacEditMeshModel(mesh.EditData!.Data, asset.DisplayName, out renderedVertices);
+            var model = LoadMeshModel(asset, out var renderedVertices);
 
             _assetModel.Children.Clear();
             _assetModel.Children.Add(model);
@@ -544,6 +1270,22 @@ public partial class MainWindow : Window
             _assetModel.Children.Clear();
             SelectedAssetSubtitle.Text = $"{asset.Kind} - {asset.PackageName} - render failed: {ex.Message}";
         }
+    }
+
+    private static GeometryModel3D LoadMeshModel(MeshAssetNode asset, out int renderedVertices)
+    {
+        var package = new AssetPackage(asset.SourcePath, loadHeaderNow: true, loadDataNow: false);
+        var metamesh = package.Items.OfType<Metamesh>().FirstOrDefault(item => item.Guid == asset.MetameshGuid);
+        var mesh = metamesh?.Meshes.FirstOrDefault(item => item.Guid == asset.MeshGuid);
+
+        if (mesh?.VertexStream == null && mesh?.EditData == null)
+        {
+            throw new InvalidOperationException("Mesh has no renderable geometry stream.");
+        }
+
+        return mesh.VertexStream != null
+            ? CreateTpacMeshModel(mesh.VertexStream.Data, asset.DisplayName, out renderedVertices)
+            : CreateTpacEditMeshModel(mesh.EditData!.Data, asset.DisplayName, out renderedVertices);
     }
 
     private void ResetScene()
@@ -918,6 +1660,7 @@ public sealed class TpacPackageNode
 public sealed class MeshAssetNode
 {
     public string DisplayName { get; init; } = string.Empty;
+    public string Badge => string.Empty;
     public string PackageName { get; init; } = string.Empty;
     public string SourcePath { get; init; } = string.Empty;
     public long ByteSize { get; init; }
@@ -929,6 +1672,32 @@ public sealed class MeshAssetNode
     public int FaceCount { get; init; }
     public bool CanRender { get; init; }
     public string Status { get; init; } = string.Empty;
+    public ObservableCollection<MeshAssetNode> Assets { get; } = [];
+}
+
+public sealed class CraftingPieceNode
+{
+    public static readonly CraftingPieceNode Empty = new() { Id = "(None)" };
+
+    public string Id { get; init; } = string.Empty;
+    public string PieceType { get; init; } = string.Empty;
+    public string MeshName { get; init; } = string.Empty;
+    public float Length { get; init; }
+    public float DistanceToNextPiece { get; init; }
+    public float DistanceToPreviousPiece { get; init; }
+    public float PieceOffset { get; init; }
+    public float PreviousPieceOffset { get; init; }
+    public float NextPieceOffset { get; init; }
+    public int Scale { get; init; } = 100;
+    public float ScaleFactor => Scale * 0.01f;
+    public float ScaledLength => Length * ScaleFactor;
+    public float ScaledDistanceToNextPiece => DistanceToNextPiece * ScaleFactor;
+    public float ScaledDistanceToPreviousPiece => DistanceToPreviousPiece * ScaleFactor;
+    public float ScaledPieceOffset => PieceOffset * ScaleFactor;
+    public float ScaledPreviousPieceOffset => PreviousPieceOffset * ScaleFactor;
+    public float ScaledNextPieceOffset => NextPieceOffset * ScaleFactor;
+
+    public override string ToString() => Id;
 }
 
 public sealed class TroopNode
