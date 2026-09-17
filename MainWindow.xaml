@@ -1,0 +1,379 @@
+<Window x:Class="LOTRAOM_Viewport.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        mc:Ignorable="d"
+        Title="Bannerlord Viewport"
+        MinHeight="720"
+        MinWidth="1180"
+        Height="820"
+        Width="1440"
+        Background="#0C1016"
+        Foreground="#ECE8D8"
+        WindowStartupLocation="CenterScreen">
+    <Window.Resources>
+        <SolidColorBrush x:Key="PanelBrush" Color="#171811" />
+        <SolidColorBrush x:Key="PanelBorderBrush" Color="#31301F" />
+        <SolidColorBrush x:Key="AccentBrush" Color="#BD9C2A" />
+        <SolidColorBrush x:Key="MutedBrush" Color="#8F8B78" />
+
+        <Style TargetType="Button">
+            <Setter Property="Background" Value="#2A281A" />
+            <Setter Property="BorderBrush" Value="#4A4324" />
+            <Setter Property="Foreground" Value="#F3EFD9" />
+            <Setter Property="Padding" Value="12,8" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+        </Style>
+
+        <Style TargetType="TextBox">
+            <Setter Property="Background" Value="#101419" />
+            <Setter Property="BorderBrush" Value="#343A40" />
+            <Setter Property="Foreground" Value="#D8D4C1" />
+            <Setter Property="Padding" Value="8,6" />
+        </Style>
+
+        <Style TargetType="TreeView">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Foreground" Value="#EEEAD8" />
+        </Style>
+
+        <Style TargetType="TreeViewItem">
+            <Setter Property="Padding" Value="4" />
+            <Setter Property="Foreground" Value="#EEEAD8" />
+        </Style>
+
+        <Style TargetType="TabControl">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+        </Style>
+
+        <Style TargetType="TabItem">
+            <Setter Property="Foreground" Value="#9D9988" />
+            <Setter Property="Padding" Value="14,9" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="TabItem">
+                        <Border x:Name="Root"
+                                Background="#14150E"
+                                BorderBrush="#2B2A1B"
+                                BorderThickness="1,1,1,1"
+                                Padding="{TemplateBinding Padding}">
+                            <Grid>
+                                <ContentPresenter x:Name="ContentSite"
+                                                  ContentSource="Header"
+                                                  HorizontalAlignment="Center"
+                                                  VerticalAlignment="Center"
+                                                  RecognizesAccessKey="True" />
+                                <Border x:Name="AccentLine"
+                                        Height="2"
+                                        VerticalAlignment="Bottom"
+                                        Background="Transparent"
+                                        Margin="0,0,0,-9" />
+                            </Grid>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsSelected" Value="True">
+                                <Setter TargetName="Root" Property="Background" Value="#202113" />
+                                <Setter TargetName="Root" Property="BorderBrush" Value="#4B4324" />
+                                <Setter TargetName="AccentLine" Property="Background" Value="{StaticResource AccentBrush}" />
+                                <Setter Property="Foreground" Value="#F3EFD9" />
+                            </Trigger>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Root" Property="Background" Value="#1B1C12" />
+                                <Setter Property="Foreground" Value="#E5DEC6" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style TargetType="ListBox">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Foreground" Value="#EEEAD8" />
+        </Style>
+    </Window.Resources>
+
+    <Grid>
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="350" />
+            <ColumnDefinition Width="*" />
+        </Grid.ColumnDefinitions>
+
+        <Border Grid.Column="0"
+                Background="{StaticResource PanelBrush}"
+                BorderBrush="{StaticResource PanelBorderBrush}"
+                BorderThickness="0,0,1,0">
+            <Grid Margin="16">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+
+                <StackPanel>
+                    <TextBlock Text="BANNERLORD ASSET VIEWER"
+                               Foreground="{StaticResource AccentBrush}"
+                               FontSize="11"
+                               FontWeight="Bold" />
+                    <TextBlock Text="BANNERLORD VIEWPORT"
+                               Margin="0,8,0,18"
+                               FontSize="23"
+                               FontWeight="Bold"
+                               FontStretch="Condensed" />
+                </StackPanel>
+
+                <TabControl Grid.Row="1" Margin="0,0,0,14">
+                    <TabItem Header="Assets">
+                        <Grid Margin="0,12,0,0">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="*" />
+                            </Grid.RowDefinitions>
+
+                            <Grid Margin="0,0,0,14">
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                </Grid.RowDefinitions>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+
+                                <TextBox x:Name="AssetPathBox"
+                                         Grid.Column="0"
+                                         IsReadOnly="True"
+                                         Text="Select Bannerlord AssetPackages folder..." />
+                                <Button Grid.Column="1"
+                                        Margin="8,0,0,0"
+                                        Click="ChooseAssetPackagesFolder_Click"
+                                        Content="Browse" />
+                                <TextBlock x:Name="ScanSummaryText"
+                                           Grid.Row="1"
+                                           Grid.ColumnSpan="2"
+                                           Margin="0,8,0,0"
+                                           Foreground="{StaticResource MutedBrush}"
+                                           FontSize="12"
+                                           Text="No packages loaded." />
+                            </Grid>
+
+                            <Border Grid.Row="1"
+                                    BorderBrush="#292817"
+                                    BorderThickness="1"
+                                    CornerRadius="4">
+                                <TreeView x:Name="AssetTree"
+                                          Margin="6"
+                                          SelectedItemChanged="AssetTree_SelectedItemChanged">
+                                    <TreeView.ItemTemplate>
+                                        <HierarchicalDataTemplate ItemsSource="{Binding Assets}">
+                                            <StackPanel Orientation="Horizontal">
+                                                <TextBlock Text="{Binding DisplayName}" FontWeight="SemiBold" />
+                                                <TextBlock Text="{Binding Badge}"
+                                                           Margin="8,0,0,0"
+                                                           Foreground="{StaticResource AccentBrush}"
+                                                           FontSize="11" />
+                                            </StackPanel>
+                                            <HierarchicalDataTemplate.ItemTemplate>
+                                                <DataTemplate>
+                                                    <StackPanel Margin="0,3">
+                                                        <TextBlock Text="{Binding DisplayName}" FontWeight="SemiBold" />
+                                                        <TextBlock Text="{Binding Status}"
+                                                                   Foreground="{StaticResource MutedBrush}"
+                                                                   FontSize="11" />
+                                                    </StackPanel>
+                                                </DataTemplate>
+                                            </HierarchicalDataTemplate.ItemTemplate>
+                                        </HierarchicalDataTemplate>
+                                    </TreeView.ItemTemplate>
+                                </TreeView>
+                            </Border>
+                        </Grid>
+                    </TabItem>
+
+                    <TabItem Header="Troops">
+                        <ScrollViewer Margin="0,12,0,0" VerticalScrollBarVisibility="Auto">
+                            <StackPanel>
+                                <Grid Margin="0,0,0,10">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBox x:Name="TroopXmlPathBox"
+                                             IsReadOnly="True"
+                                             Text="Select troop XML..." />
+                                    <Button Grid.Column="1"
+                                            Margin="8,0,0,0"
+                                            Click="ChooseTroopXml_Click"
+                                            Content="XML" />
+                                </Grid>
+
+                                <TextBlock x:Name="TroopSummaryText"
+                                           Foreground="{StaticResource MutedBrush}"
+                                           FontSize="12"
+                                           Text="No troop XML loaded." />
+
+                                <Border Margin="0,10,0,14"
+                                        Height="178"
+                                        BorderBrush="#292817"
+                                        BorderThickness="1"
+                                        CornerRadius="4">
+                                    <ListBox x:Name="TroopList"
+                                             Margin="6"
+                                             SelectionChanged="TroopList_SelectionChanged">
+                                        <ListBox.ItemTemplate>
+                                            <DataTemplate>
+                                                <StackPanel Margin="0,3">
+                                                    <TextBlock Text="{Binding DisplayName}" FontWeight="SemiBold" />
+                                                    <TextBlock Text="{Binding Id}"
+                                                               Foreground="{StaticResource MutedBrush}"
+                                                               FontSize="11" />
+                                                </StackPanel>
+                                            </DataTemplate>
+                                        </ListBox.ItemTemplate>
+                                    </ListBox>
+                                </Border>
+
+                                <TextBlock Text="CUSTOM LOADOUT"
+                                           Foreground="{StaticResource AccentBrush}"
+                                           FontSize="11"
+                                           FontWeight="Bold" />
+
+                                <Grid Margin="0,8,0,10">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="82" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                    </Grid.RowDefinitions>
+
+                                    <TextBlock Text="Helmet" Foreground="{StaticResource MutedBrush}" Margin="0,6" />
+                                    <TextBox x:Name="HelmetBox" Grid.Column="1" Margin="0,2" />
+                                    <TextBlock Grid.Row="1" Text="Cape" Foreground="{StaticResource MutedBrush}" Margin="0,6" />
+                                    <TextBox x:Name="CapeBox" Grid.Row="1" Grid.Column="1" Margin="0,2" />
+                                    <TextBlock Grid.Row="2" Text="Body" Foreground="{StaticResource MutedBrush}" Margin="0,6" />
+                                    <TextBox x:Name="BodyBox" Grid.Row="2" Grid.Column="1" Margin="0,2" />
+                                    <TextBlock Grid.Row="3" Text="Arm" Foreground="{StaticResource MutedBrush}" Margin="0,6" />
+                                    <TextBox x:Name="ArmBox" Grid.Row="3" Grid.Column="1" Margin="0,2" />
+                                    <TextBlock Grid.Row="4" Text="Leg" Foreground="{StaticResource MutedBrush}" Margin="0,6" />
+                                    <TextBox x:Name="LegBox" Grid.Row="4" Grid.Column="1" Margin="0,2" />
+                                    <TextBlock Grid.Row="5" Text="Item0" Foreground="{StaticResource MutedBrush}" Margin="0,6" />
+                                    <TextBox x:Name="Item0Box" Grid.Row="5" Grid.Column="1" Margin="0,2" />
+                                    <TextBlock Grid.Row="6" Text="Item1" Foreground="{StaticResource MutedBrush}" Margin="0,6" />
+                                    <TextBox x:Name="Item1Box" Grid.Row="6" Grid.Column="1" Margin="0,2" />
+                                </Grid>
+
+                                <StackPanel Orientation="Horizontal">
+                                    <Button Click="ApplyCustomLoadout_Click" Content="Apply" />
+                                    <Button Margin="8,0,0,0" Click="ClearCustomLoadout_Click" Content="Clear" />
+                                </StackPanel>
+                            </StackPanel>
+                        </ScrollViewer>
+                    </TabItem>
+                </TabControl>
+
+                <Border Grid.Row="2"
+                        Margin="0,14,0,0"
+                        BorderBrush="#292817"
+                        BorderThickness="1"
+                        CornerRadius="4"
+                        Padding="12">
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
+                        <TextBlock Text="Packages" Foreground="{StaticResource MutedBrush}" />
+                        <TextBlock x:Name="PackageCountText"
+                                   Grid.Column="1"
+                                   FontWeight="Bold"
+                                   Text="0" />
+                        <TextBlock Grid.Row="1" Text="Mesh candidates" Foreground="{StaticResource MutedBrush}" />
+                        <TextBlock x:Name="MeshCountText"
+                                   Grid.Row="1"
+                                   Grid.Column="1"
+                                   FontWeight="Bold"
+                                   Text="0" />
+                        <TextBlock Grid.Row="2" Text="Extractor" Foreground="{StaticResource MutedBrush}" />
+                        <TextBlock x:Name="ExtractorStatusText"
+                                   Grid.Row="2"
+                                   Grid.Column="1"
+                                   FontWeight="Bold"
+                                   Text="not loaded" />
+                    </Grid>
+                </Border>
+            </Grid>
+        </Border>
+
+        <Grid Grid.Column="1" Background="#0D1219">
+            <Viewport3D x:Name="ModelViewport"
+                        ClipToBounds="True"
+                        MouseDown="ModelViewport_MouseDown"
+                        MouseMove="ModelViewport_MouseMove"
+                        MouseUp="ModelViewport_MouseUp"
+                        MouseWheel="ModelViewport_MouseWheel">
+                <Viewport3D.Camera>
+                    <PerspectiveCamera x:Name="ViewportCamera"
+                                       FieldOfView="45"
+                                       Position="4,3,6"
+                                       LookDirection="-4,-3,-6"
+                                       UpDirection="0,1,0" />
+                </Viewport3D.Camera>
+            </Viewport3D>
+
+            <Border HorizontalAlignment="Left"
+                    VerticalAlignment="Top"
+                    Margin="24"
+                    Background="#BB0B1016"
+                    BorderBrush="#23303B"
+                    BorderThickness="1"
+                    CornerRadius="4"
+                    Padding="14,12">
+                <StackPanel>
+                    <TextBlock x:Name="SelectedAssetTitle"
+                               Text="No mesh selected"
+                               FontSize="18"
+                               FontWeight="Bold" />
+                    <TextBlock x:Name="SelectedAssetSubtitle"
+                               Margin="0,4,0,0"
+                               Foreground="#A9B0B8"
+                               Text="Choose an AssetPackages folder to begin." />
+                </StackPanel>
+            </Border>
+
+            <Border HorizontalAlignment="Right"
+                    VerticalAlignment="Bottom"
+                    Margin="24"
+                    Background="#BB0B1016"
+                    BorderBrush="#23303B"
+                    BorderThickness="1"
+                    CornerRadius="4"
+                    Padding="12,10">
+                <StackPanel Orientation="Horizontal">
+                    <TextBlock Text="Orbit: drag"
+                               Foreground="#B8C0C8"
+                               Margin="0,0,14,0" />
+                    <TextBlock Text="Zoom: wheel"
+                               Foreground="#B8C0C8" />
+                </StackPanel>
+            </Border>
+        </Grid>
+    </Grid>
+</Window>
