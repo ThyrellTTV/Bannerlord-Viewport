@@ -18,6 +18,7 @@ namespace LOTRAOM_Viewport;
 
 public partial class MainWindow : Window
 {
+    private static readonly HashSet<Guid> PreviewAssetTypes = [Metamesh.TYPE_GUID, TpacTool.Lib.Material.TYPE_GUID, Texture.TYPE_GUID];
     private const double AssetPreviewSize = 2.8;
     private const double CraftingPieceUnitScale = 0.035;
     private static readonly string SettingsDirectory = Path.Combine(
@@ -51,6 +52,9 @@ public partial class MainWindow : Window
     private readonly List<TpacPackageNode> _allPackages = [];
     private readonly ObservableCollection<TroopNode> _troops = [];
     private readonly ObservableCollection<MeshAssetNode> _meshOptions = [];
+    private readonly List<MeshAssetNode> _weaponOptions = [];
+    private readonly Dictionary<string, XElement> _equipmentItems = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, CraftingPieceNode> _equipmentCraftingPieces = new(StringComparer.OrdinalIgnoreCase);
     private readonly ObservableCollection<CraftingPieceNode> _craftingPieces = [];
     private readonly Dictionary<string, HashSet<string>> _craftingTemplatePieceIds = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, (string Type, int Order)[]> _craftingTemplateBuildOrders = new(StringComparer.OrdinalIgnoreCase);
@@ -61,7 +65,7 @@ public partial class MainWindow : Window
     private readonly Dictionary<TextBox, ComboBox> _craftingTextBoxes = [];
     private readonly Dictionary<Guid, string> _materialPackagePaths = [];
     private readonly Dictionary<Guid, string> _texturePackagePaths = [];
-    private readonly Dictionary<string, AssetPackage> _lookupPackageCache = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<(string Path, Guid Asset), AssetPackage> _lookupPackageCache = [];
     private bool _isUpdatingComboFilters;
     private bool _isUpdatingCraftingCombos;
     private bool _isUpdatingCraftingEditor;
@@ -74,7 +78,15 @@ public partial class MainWindow : Window
     private float _craftingStepSize = 1f;
     private readonly Model3DGroup _scene = new();
     private readonly Model3DGroup _assetModel = new();
-    private string _lastMaterialStatus = "texture: not attempted";
+    private readonly StudioRenderer _renderer;
+    private bool _isUpdatingTableauColours = true;
+    private Color _tableauPrimaryColour = Colors.White;
+    private Color _tableauSecondaryColour = Colors.White;
+    private int _previewWorkspace = -1;
+    private readonly System.Windows.Threading.DispatcherTimer _tableauColourTimer = new()
+    {
+        Interval = TimeSpan.FromMilliseconds(120)
+    };
     private Point _lastMousePosition;
     private bool _isOrbiting;
     private double _yaw = 34;
@@ -89,10 +101,104 @@ public partial class MainWindow : Window
         TroopList.ItemsSource = _troops;
         BindEquipmentDropdowns();
         BindCraftingDropdowns();
-        ModelViewport.Children.Add(new ModelVisual3D { Content = _scene });
+        _renderer = new StudioRenderer(ModelViewport, _scene);
+        InitializeTroopPoseControls();
+        _tableauColourTimer.Tick += (_, _) =>
+        {
+            _tableauColourTimer.Stop();
+            UpdateTableauColourEditorVisibility();
+        };
+        _assetModel.Changed += (_, _) => UpdateTableauColourEditorVisibility();
+        _isUpdatingTableauColours = false;
+        Closed += (_, _) => { _tableauColourTimer.Stop(); _renderer.Dispose(); };
         ResetScene();
         RenderEmptyPreview();
         LoadSavedSettingsIfAvailable();
+        RefreshTroopPoseLibrary();
+    }
+
+    private void WorkspaceTabs_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (!ReferenceEquals(e.OriginalSource, WorkspaceTabs))
+        {
+            return;
+        }
+
+        UpdateCraftingEditorVisibility();
+        UpdateTableauColourEditorVisibility();
+        RefreshTroopPoseAvailability();
+        UpdateTroopXmlExport();
+    }
+
+    private void UpdateTableauColourEditorVisibility()
+    {
+        if (_isUpdatingTableauColours || TableauColourPanel == null) return;
+        var enabled = _previewWorkspace is 0 or 1 && StudioRenderer.HasFactionColourBlending(_assetModel);
+        TableauColourPanel.Visibility = enabled && WorkspaceTabs.SelectedIndex == _previewWorkspace
+            ? Visibility.Visible : Visibility.Collapsed;
+        _renderer.SetColours(_tableauPrimaryColour, _tableauSecondaryColour, enabled);
+    }
+
+    private static bool TryParseTableauColour(string text, out Color colour)
+    {
+        var hex = text.Trim().TrimStart('#');
+        if (hex.Length == 6 && uint.TryParse(hex, NumberStyles.HexNumber, CultureInfo.InvariantCulture, out var value))
+        {
+            colour = Color.FromRgb((byte)(value >> 16), (byte)(value >> 8), (byte)value);
+            return true;
+        }
+        colour = default;
+        return false;
+    }
+
+    private void TableauHex_TextChanged(object sender, TextChangedEventArgs e)
+    {
+        if (_isUpdatingTableauColours || sender is not TextBox box) return;
+        if (!TryParseTableauColour(box.Text, out var colour))
+        {
+            box.BorderBrush = Brushes.IndianRed;
+            box.ToolTip = "Enter a six-digit hex colour.";
+            return;
+        }
+        box.ClearValue(Control.BorderBrushProperty);
+        box.ClearValue(FrameworkElement.ToolTipProperty);
+        if (Equals(box.Tag, "Primary"))
+        {
+            _tableauPrimaryColour = colour;
+            TableauPrimarySwatch.Background = new SolidColorBrush(colour);
+        }
+        else
+        {
+            _tableauSecondaryColour = colour;
+            TableauSecondarySwatch.Background = new SolidColorBrush(colour);
+        }
+        _tableauColourTimer.Stop();
+        _tableauColourTimer.Start();
+    }
+
+    private void TableauHex_LostFocus(object sender, RoutedEventArgs e)
+    {
+        if (sender is TextBox box && TryParseTableauColour(box.Text, out var colour))
+            box.Text = $"#{colour.R:X2}{colour.G:X2}{colour.B:X2}";
+    }
+
+    private void TableauColourPicker_Click(object sender, RoutedEventArgs e)
+    {
+        var primary = sender is Button button && Equals(button.Tag, "Primary");
+        var colour = primary ? _tableauPrimaryColour : _tableauSecondaryColour;
+        using var dialog = new System.Windows.Forms.ColorDialog
+        {
+            FullOpen = true,
+            Color = System.Drawing.Color.FromArgb(colour.R, colour.G, colour.B)
+        };
+        var owner = new System.Windows.Forms.NativeWindow();
+        owner.AssignHandle(new System.Windows.Interop.WindowInteropHelper(this).Handle);
+        try
+        {
+            if (dialog.ShowDialog(owner) == System.Windows.Forms.DialogResult.OK)
+                (primary ? TableauPrimaryHexBox : TableauSecondaryHexBox).Text = $"#{dialog.Color.R:X2}{dialog.Color.G:X2}{dialog.Color.B:X2}";
+        }
+        finally { owner.ReleaseHandle(); }
     }
 
     private void ChooseAssetPackagesFolder_Click(object sender, RoutedEventArgs e)
@@ -119,7 +225,11 @@ public partial class MainWindow : Window
         _allPackages.Clear();
         _materialPackagePaths.Clear();
         _texturePackagePaths.Clear();
+        _texturePixelGuids.Clear();
         _lookupPackageCache.Clear();
+        _equipmentPreviewModels.Clear();
+        _equipmentDependencyMeshes.Clear();
+        _equipmentDependenciesIndexed = false;
 
         if (!Directory.Exists(folderPath))
         {
@@ -153,6 +263,7 @@ public partial class MainWindow : Window
         PackageCountText.Text = _packages.Count.ToString();
         MeshCountText.Text = _packages.Sum(package => package.Assets.Count).ToString();
         RefreshMeshOptions();
+        RefreshTroopPoseLibrary();
         ExtractorStatusText.Text = _packages.Count == 0 ? "not loaded" : "TpacTool.Lib";
         ScanSummaryText.Text = _packages.Count == 0
             ? "No .tpac files found in this folder."
@@ -169,6 +280,12 @@ public partial class MainWindow : Window
             RenderEmptyPreview();
             SelectedAssetTitle.Text = "Packages loaded";
             SelectedAssetSubtitle.Text = "Select a mesh candidate from the left.";
+        }
+
+        if (TroopList.SelectedItem is TroopNode troop)
+        {
+            LoadEquipmentDefinitions(TroopXmlPathBox.Text);
+            RenderLoadoutPreview(troop.DisplayName, troop.Equipment);
         }
     }
 
@@ -349,6 +466,8 @@ public partial class MainWindow : Window
             TextSearch.SetTextPath(comboBox, nameof(MeshAssetNode.DisplayName));
             comboBox.Loaded += EquipmentCombo_Loaded;
             comboBox.DropDownOpened += EquipmentCombo_DropDownOpened;
+            comboBox.SelectionChanged += CustomLoadout_Changed;
+            comboBox.AddHandler(TextBoxBase.TextChangedEvent, new TextChangedEventHandler(CustomLoadout_Changed));
         }
     }
 
@@ -427,10 +546,13 @@ public partial class MainWindow : Window
         }
 
         var needle = searchText?.Trim() ?? string.Empty;
+        IEnumerable<MeshAssetNode> options = ReferenceEquals(comboBox, Item0Combo) || ReferenceEquals(comboBox, Item1Combo)
+            ? _weaponOptions : _meshOptions;
         var matches = string.IsNullOrWhiteSpace(needle)
-            ? _meshOptions.Take(250)
-            : _meshOptions
-                .Where(option => option.DisplayName.Contains(needle, StringComparison.OrdinalIgnoreCase))
+            ? options.Take(250)
+            : options
+                .Where(option => option.DisplayName.Contains(needle, StringComparison.OrdinalIgnoreCase) ||
+                    option.Kind == "Item" && option.Status.Contains(needle, StringComparison.OrdinalIgnoreCase))
                 .Take(250);
 
         _isUpdatingComboFilters = true;
@@ -985,7 +1107,7 @@ public partial class MainWindow : Window
     private void SetActiveCraftingPiece(CraftingPieceNode? piece)
     {
         _activeCraftingPiece = piece;
-        CraftingEditorPanel.Visibility = piece == null ? Visibility.Collapsed : Visibility.Visible;
+        UpdateCraftingEditorVisibility();
         _isUpdatingCraftingEditor = true;
         CraftingActivePieceText.Text = piece?.Id ?? "Select a piece to edit.";
         CraftingPieceOffsetBox.Text = piece == null ? string.Empty : FormatCraftingFloat(piece.PieceOffset);
@@ -994,6 +1116,13 @@ public partial class MainWindow : Window
         CraftingScaleBox.Text = piece == null ? string.Empty : piece.Scale.ToString(CultureInfo.InvariantCulture);
         _isUpdatingCraftingEditor = false;
         UpdateCraftingXmlOutput();
+    }
+
+    private void UpdateCraftingEditorVisibility()
+    {
+        CraftingEditorPanel.Visibility = _activeCraftingPiece != null && CraftingTab.IsSelected
+            ? Visibility.Visible
+            : Visibility.Collapsed;
     }
 
     private void CraftingStepRadio_Checked(object sender, RoutedEventArgs e)
@@ -1161,6 +1290,8 @@ public partial class MainWindow : Window
 
     private void RenderCraftingWeaponPreview()
     {
+        _previewWorkspace = 2;
+        SuspendTroopPose();
         _assetModel.Children.Clear();
 
         var pieces = new[]
@@ -1246,11 +1377,19 @@ public partial class MainWindow : Window
             ["Pommel"] = _craftingPommel
         };
 
+        return CalculateCraftingPivots(selectedByType, GetCraftingBuildOrder(), out weaponLength);
+    }
+
+    private static Dictionary<string, float> CalculateCraftingPivots(
+        IReadOnlyDictionary<string, CraftingPieceNode?> selectedByType,
+        (string Type, int Order)[] buildOrder,
+        out float weaponLength)
+    {
         var pivots = new Dictionary<string, float>(StringComparer.OrdinalIgnoreCase);
         var bottom = 0f;
         var top = 0f;
 
-        foreach (var (type, order) in GetCraftingBuildOrder())
+        foreach (var (type, order) in buildOrder)
         {
             var piece = selectedByType.TryGetValue(type, out var selected) ? selected : null;
             if (piece == null)
@@ -1292,14 +1431,15 @@ public partial class MainWindow : Window
         }
 
         weaponLength = float.NaN;
-        if (_craftingBlade != null && pivots.TryGetValue("Blade", out var bladePivot) && !float.IsNaN(bladePivot))
+        if (selectedByType.TryGetValue("Blade", out var blade) && blade != null &&
+            pivots.TryGetValue("Blade", out var bladePivot) && !float.IsNaN(bladePivot))
         {
-            var maxPieceReach = new[] { _craftingBlade, _craftingGuard, _craftingHandle, _craftingPommel }
+            var maxPieceReach = selectedByType.Values
                 .Where(piece => piece != null)
                 .Select(piece => piece!.ScaledDistanceToNextPiece + piece.ScaledPieceOffset)
                 .DefaultIfEmpty(0)
                 .Max();
-            weaponLength = MathF.Max(bladePivot + _craftingBlade.ScaledDistanceToNextPiece, maxPieceReach);
+            weaponLength = MathF.Max(bladePivot + blade.ScaledDistanceToNextPiece, maxPieceReach);
         }
 
         return pivots;
@@ -1381,6 +1521,120 @@ public partial class MainWindow : Window
         return float.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out parsed);
     }
 
+    private void LoadEquipmentDefinitions(string troopPath)
+    {
+        _equipmentItems.Clear();
+        _equipmentCraftingPieces.Clear();
+        _equipmentTemplates.Clear();
+        _equipmentPieceDefinitions.Clear();
+        _equipmentPreviewModels.Clear();
+        _equipmentAssetFolders.Clear();
+        _equipmentDependencyMeshes.Clear();
+        _equipmentDependenciesIndexed = false;
+        var visited = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var sourcePath in new[] { AssetPathBox.Text, troopPath })
+        {
+            if (string.IsNullOrWhiteSpace(sourcePath))
+            {
+                continue;
+            }
+
+            var directory = Directory.Exists(sourcePath)
+                ? new DirectoryInfo(sourcePath)
+                : new FileInfo(sourcePath).Directory;
+            while (directory != null && !File.Exists(Path.Combine(directory.FullName, "SubModule.xml")))
+            {
+                directory = directory.Parent;
+            }
+
+            if (directory != null)
+            {
+                IndexEquipmentModule(directory.FullName, visited);
+            }
+        }
+        _weaponOptions.Clear();
+        _weaponOptions.AddRange(_equipmentItems.Where(pair => IsWeaponItem(pair.Value))
+            .Select(pair => new MeshAssetNode { DisplayName = "Item." + pair.Key, Kind = "Item",
+                Status = CleanXmlDisplayText(GetAttributeValue(pair.Value, "name")) ?? pair.Key })
+            .OrderBy(option => option.DisplayName, StringComparer.OrdinalIgnoreCase));
+        var currentLoadout = ReadEquipmentBoxes();
+        FilterEquipmentCombo(Item0Combo, Item0Combo.Text);
+        FilterEquipmentCombo(Item1Combo, Item1Combo.Text);
+        SetEquipmentBoxes(currentLoadout);
+    }
+
+    private void IndexEquipmentModule(string modulePath, HashSet<string> visited)
+    {
+        var manifestPath = Path.Combine(modulePath, "SubModule.xml");
+        if (!File.Exists(manifestPath) || !visited.Add(modulePath))
+        {
+            return;
+        }
+
+        var manifest = XDocument.Load(manifestPath);
+        var modulesPath = Directory.GetParent(modulePath)!.FullName;
+        foreach (var dependency in manifest.Descendants()
+                     .Where(element => element.Name.LocalName.Equals("DependedModule", StringComparison.OrdinalIgnoreCase)))
+        {
+            var id = GetAttributeValue(dependency, "id");
+            if (!string.IsNullOrWhiteSpace(id))
+            {
+                IndexEquipmentModule(Path.Combine(modulesPath, id), visited);
+            }
+        }
+
+        foreach (var entry in manifest.Descendants()
+                     .Where(element => element.Name.LocalName.Equals("XmlName", StringComparison.OrdinalIgnoreCase)))
+        {
+            var kind = GetAttributeValue(entry, "id");
+            if (!string.Equals(kind, "Items", StringComparison.OrdinalIgnoreCase) &&
+                !string.Equals(kind, "CraftingPieces", StringComparison.OrdinalIgnoreCase) &&
+                !string.Equals(kind, "CraftingTemplates", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            var relativePath = GetAttributeValue(entry, "path");
+            if (string.IsNullOrWhiteSpace(relativePath))
+            {
+                continue;
+            }
+
+            var dataPath = Path.Combine(modulePath, "ModuleData", relativePath);
+            var files = Directory.Exists(dataPath)
+                ? Directory.EnumerateFiles(dataPath, "*.xml", SearchOption.AllDirectories).OrderBy(path => path)
+                : File.Exists(dataPath + ".xml") ? new[] { dataPath + ".xml" }.AsEnumerable() : [];
+            foreach (var file in files)
+            {
+                var document = XDocument.Load(file);
+                foreach (var element in document.Descendants())
+                {
+                    if (element.Name.LocalName is "Item" or "CraftedItem")
+                    {
+                        var id = GetAttributeValue(element, "id");
+                        if (!string.IsNullOrWhiteSpace(id))
+                        {
+                            _equipmentItems[id] = element;
+                        }
+                    }
+                    else if (element.Name.LocalName.Equals("CraftingPiece", StringComparison.OrdinalIgnoreCase) &&
+                             ParseCraftingPiece(element) is { } piece)
+                    {
+                        _equipmentCraftingPieces[piece.Id] = piece;
+                        _equipmentPieceDefinitions[piece.Id] = element;
+                    }
+                    else if (element.Name.LocalName == "CraftingTemplate" && GetAttributeValue(element, "id") is { } templateId)
+                    {
+                        _equipmentTemplates[templateId] = element;
+                    }
+                }
+            }
+        }
+        _equipmentAssetFolders.Add(Path.Combine(modulePath, "AssetPackages"));
+        _equipmentAssetFolders.Add(Path.Combine(modulePath, "EmAssetPackages"));
+    }
+
     private void LoadTroopXml(string filePath)
     {
         TroopXmlPathBox.Text = filePath;
@@ -1388,6 +1642,7 @@ public partial class MainWindow : Window
 
         try
         {
+            LoadEquipmentDefinitions(filePath);
             var document = XDocument.Load(filePath);
             var troops = document
                 .Descendants()
@@ -1407,6 +1662,8 @@ public partial class MainWindow : Window
             TroopSummaryText.Text = _troops.Count == 0
                 ? "No troop-like entries found in this XML."
                 : $"Loaded {_troops.Count} troop(s).";
+            UpdateTroopXmlExport();
+            RefreshTroopPoseLibrary();
 
             SelectedAssetTitle.Text = "Troop XML loaded";
             SelectedAssetSubtitle.Text = "Select a troop or build a custom loadout.";
@@ -1467,7 +1724,13 @@ public partial class MainWindow : Window
                      descendant.Name.LocalName.Equals("equipment", StringComparison.OrdinalIgnoreCase)))
         {
             var slotValue = GetAttributeValue(element, "slot");
-            if (!slot.Equals(slotValue, StringComparison.OrdinalIgnoreCase))
+            var canonicalSlot = slotValue?.ToLowerInvariant() switch
+            {
+                "head" => "Helmet",
+                "gloves" => "Arm",
+                _ => slotValue
+            };
+            if (!slot.Equals(canonicalSlot, StringComparison.OrdinalIgnoreCase))
             {
                 continue;
             }
@@ -1496,10 +1759,10 @@ public partial class MainWindow : Window
         }
 
         var cleaned = value.Trim();
-        var equalsIndex = cleaned.LastIndexOf('=');
-        if (cleaned.StartsWith("{", StringComparison.Ordinal) && equalsIndex >= 0 && equalsIndex < cleaned.Length - 1)
+        var tokenEnd = cleaned.IndexOf('}');
+        if (cleaned.StartsWith("{=", StringComparison.Ordinal) && tokenEnd >= 0)
         {
-            cleaned = cleaned[(equalsIndex + 1)..].TrimEnd('}');
+            cleaned = cleaned[(tokenEnd + 1)..];
         }
 
         return cleaned;
@@ -1541,6 +1804,98 @@ public partial class MainWindow : Window
         return loadout;
     }
 
+    private void CustomLoadout_Changed(object sender, RoutedEventArgs e)
+    {
+        if (!_isUpdatingComboFilters) UpdateTroopXmlExport();
+    }
+
+    private XElement CreateEquipmentRosterXml(IReadOnlyDictionary<string, string> loadout)
+    {
+        var roster = new XElement("EquipmentRoster");
+        foreach (var slot in EquipmentSlots)
+        {
+            if (!loadout.TryGetValue(slot, out var value) || string.IsNullOrWhiteSpace(value)) continue;
+            var reference = ResolveEquipmentItemReference(slot, value.Trim());
+            roster.Add(new XElement("equipment", new XAttribute("slot", slot == "Helmet" ? "Head" : slot),
+                new XAttribute("id", reference)));
+        }
+        return roster;
+    }
+
+    private string ResolveEquipmentItemReference(string slot, string value)
+    {
+        var explicitReference = value.StartsWith("Item.", StringComparison.OrdinalIgnoreCase);
+        var id = explicitReference ? value[5..].Trim() : value;
+        if (string.IsNullOrWhiteSpace(id)) throw new InvalidOperationException($"{slot}: enter an item ID after Item.");
+        if (_equipmentItems.TryGetValue(id, out var item)) return "Item." + GetAttributeValue(item, "id");
+        if (explicitReference) return "Item." + id;
+
+        var itemType = slot switch
+        {
+            "Helmet" => "HeadArmor", "Cape" => "Cape", "Body" => "BodyArmor",
+            "Arm" => "HandArmor", "Leg" => "LegArmor", _ => ""
+        };
+        var matches = _equipmentItems.Where(pair =>
+            string.Equals(GetAttributeValue(pair.Value, "mesh"), value, StringComparison.OrdinalIgnoreCase) &&
+            (slot is "Item0" or "Item1" ? IsWeaponItem(pair.Value) :
+                GetAttributeValue(pair.Value, "type") is not { Length: > 0 } type || type.Equals(itemType, StringComparison.OrdinalIgnoreCase)))
+            .Select(pair => GetAttributeValue(pair.Value, "id") ?? pair.Key).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+        if (matches.Length == 1) return "Item." + matches[0];
+        if (matches.Length > 1)
+            throw new InvalidOperationException($"{slot}: mesh '{value}' belongs to multiple items. Enter the exact Item.id.");
+        if (_meshOptions.Any(mesh => mesh.DisplayName.Equals(value, StringComparison.OrdinalIgnoreCase)))
+            throw new InvalidOperationException($"{slot}: no item ID found for mesh '{value}'. Enter its Item.id.");
+        return "Item." + id;
+    }
+
+    private void UpdateTroopXmlExport()
+    {
+        if (TroopXmlExportPanel == null) return;
+        TroopXmlExportPanel.Visibility = WorkspaceTabs.SelectedIndex == 1 ? Visibility.Visible : Visibility.Collapsed;
+        try
+        {
+            var loadout = ReadEquipmentBoxes();
+            TroopXmlOutputBox.Text = CreateEquipmentRosterXml(loadout).ToString();
+            CopyTroopXmlButton.IsEnabled = ExportTroopXmlButton.IsEnabled = loadout.Count > 0;
+            TroopXmlStatusText.Text = loadout.Count == 0 ? "No equipment selected." : "";
+        }
+        catch (InvalidOperationException ex)
+        {
+            TroopXmlOutputBox.Text = "";
+            CopyTroopXmlButton.IsEnabled = ExportTroopXmlButton.IsEnabled = false;
+            TroopXmlStatusText.Text = ex.Message;
+        }
+    }
+
+    private void CopyTroopXml_Click(object sender, RoutedEventArgs e)
+    {
+        UpdateTroopXmlExport();
+        if (!CopyTroopXmlButton.IsEnabled) return;
+        Clipboard.SetText(TroopXmlOutputBox.Text);
+        TroopXmlStatusText.Text = "XML copied.";
+    }
+
+    private void ExportTroopXml_Click(object sender, RoutedEventArgs e)
+    {
+        UpdateTroopXmlExport();
+        if (!ExportTroopXmlButton.IsEnabled) return;
+        var dialog = new SaveFileDialog
+        {
+            Title = "Export custom equipment roster", Filter = "XML files (*.xml)|*.xml|All files (*.*)|*.*",
+            FileName = "equipment_roster.xml", DefaultExt = ".xml", AddExtension = true
+        };
+        if (dialog.ShowDialog(this) != true) return;
+        try
+        {
+            File.WriteAllText(dialog.FileName, TroopXmlOutputBox.Text);
+            TroopXmlStatusText.Text = "Equipment roster exported.";
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            TroopXmlStatusText.Text = $"Could not export XML: {ex.Message}";
+        }
+    }
+
     private void SetEquipmentBoxes(IReadOnlyDictionary<string, string> loadout)
     {
         SetComboValue(HelmetCombo, GetSlotValue(loadout, "Helmet"));
@@ -1550,6 +1905,7 @@ public partial class MainWindow : Window
         SetComboValue(LegCombo, GetSlotValue(loadout, "Leg"));
         SetComboValue(Item0Combo, GetSlotValue(loadout, "Item0"));
         SetComboValue(Item1Combo, GetSlotValue(loadout, "Item1"));
+        UpdateTroopXmlExport();
     }
 
     private IEnumerable<ComboBox> GetEquipmentCombos()
@@ -1591,48 +1947,179 @@ public partial class MainWindow : Window
 
     private void RenderLoadoutPreview(string title, IReadOnlyDictionary<string, string> loadout)
     {
+        _previewWorkspace = 1;
+        StopPosePlayback();
+        if (_troopPreviewLoadout.Count != loadout.Count || loadout.Any(pair =>
+            !_troopPreviewLoadout.TryGetValue(pair.Key, out var previous) || !previous.Equals(pair.Value, StringComparison.OrdinalIgnoreCase)))
+            _equipmentPreviewModels.Clear();
+        _troopPreviewTitle = title;
+        _troopPreviewLoadout = new Dictionary<string, string>(loadout, StringComparer.OrdinalIgnoreCase);
+        _troopHeldWeapon = _troopHeldShield = false;
+        _troopHeldCategory = "";
+        _usedHolsterGroups.Clear();
+        _heldEquipmentModels.Clear();
         _assetModel.Children.Clear();
+        var assembledLoadout = new Model3DGroup();
 
         if (loadout.Count == 0)
         {
+            RefreshEquipmentStateControls(loadout);
             SelectedAssetTitle.Text = title;
             SelectedAssetSubtitle.Text = "No equipment selected.";
+            RefreshTroopPoseAvailability();
             return;
         }
 
         var renderedSlots = new List<string>();
         var missingSlots = new List<string>();
+        PrepareEquipmentHands(loadout);
         foreach (var slot in EquipmentSlots)
         {
-            if (!loadout.TryGetValue(slot, out var meshName))
+            if (!loadout.TryGetValue(slot, out var equipmentName))
             {
-                continue;
-            }
-
-            var meshAsset = FindMeshOption(meshName);
-            if (meshAsset == null)
-            {
-                missingSlots.Add(slot);
                 continue;
             }
 
             try
             {
-                var model = LoadMeshModel(meshAsset, out _);
-                _assetModel.Children.Add(model);
+                var model = slot is "Item0" or "Item1"
+                    ? LoadHeldEquipmentModel(equipmentName, slot) : LoadEquipmentModel(equipmentName);
+                assembledLoadout.Children.Add(model);
                 renderedSlots.Add(slot);
             }
-            catch
+            catch (Exception ex)
             {
-                missingSlots.Add(slot);
+                missingSlots.Add($"{slot}: {ex.Message}");
             }
+        }
+
+        if (assembledLoadout.Children.Count > 0)
+        {
+            // Mesh loading already converts the axes; preserve the equipment's shared origin.
+            var armourBounds = assembledLoadout.Children.Where(model => !_heldEquipmentModels.Contains(model))
+                .Aggregate(Rect3D.Empty, (bounds, model) => { bounds.Union(model.Bounds); return bounds; });
+            assembledLoadout.Transform = CreateFitTransform(armourBounds.IsEmpty ? assembledLoadout.Bounds : armourBounds, AssetPreviewSize);
+            _assetModel.Children.Add(assembledLoadout);
         }
 
         SelectedAssetTitle.Text = title;
         SelectedAssetSubtitle.Text = renderedSlots.Count == 0
-            ? "No selected loadout meshes could be rendered."
-            : $"Rendered {renderedSlots.Count} slot(s)" +
-              (missingSlots.Count == 0 ? "." : $"; {missingSlots.Count} unresolved.");
+            ? "No selected loadout meshes could be rendered. " + string.Join("; ", missingSlots)
+            : missingSlots.Count == 0 ? "" : $"Unavailable equipment: {string.Join("; ", missingSlots)}";
+        RefreshTroopPoseAvailability();
+        SelectEquipmentHoldingPose();
+        RefreshEquipmentStateControls(loadout);
+    }
+
+    private Model3D LoadEquipmentModel(string equipmentName)
+        => CopyEquipmentPreview(equipmentName, false, () => LoadEquipmentModelSource(equipmentName));
+
+    private Model3D LoadEquipmentModelSource(string equipmentName)
+    {
+        var itemId = equipmentName.StartsWith("Item.", StringComparison.OrdinalIgnoreCase)
+            ? equipmentName[5..]
+            : equipmentName;
+        if (_equipmentItems.TryGetValue(itemId, out var item))
+        {
+            if (item.Name.LocalName.Equals("CraftedItem", StringComparison.OrdinalIgnoreCase))
+            {
+                return LoadCraftedEquipmentModel(item);
+            }
+
+            var meshName = GetAttributeValue(item, "mesh");
+            if (string.IsNullOrWhiteSpace(meshName))
+            {
+                throw new InvalidOperationException($"Item '{itemId}' has no mesh.");
+            }
+
+            itemId = meshName;
+        }
+        else if (equipmentName.StartsWith("Item.", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException($"Item '{itemId}' was not found in module XML.");
+        }
+
+        var meshAsset = FindEquipmentMesh(itemId)
+            ?? throw new InvalidOperationException($"Mesh '{itemId}' is not in the loaded TPAC assets.");
+        return LoadMeshModel(meshAsset, out _, MeshRenderMode.Raw);
+    }
+
+    private Model3DGroup LoadCraftedEquipmentModel(XElement item, bool sheathed = false)
+    {
+        var pieces = new Dictionary<string, CraftingPieceNode?>(StringComparer.OrdinalIgnoreCase);
+        foreach (var reference in item.Descendants().Where(element => element.Name.LocalName == "Piece"))
+        {
+            var id = GetAttributeValue(reference, "id") ?? string.Empty;
+            if (!_equipmentCraftingPieces.TryGetValue(id, out var definition))
+            {
+                throw new InvalidOperationException($"Crafting piece '{id}' was not found in module XML.");
+            }
+
+            var piece = new CraftingPieceNode
+            {
+                MeshName = definition.MeshName,
+                Length = definition.Length,
+                DistanceToNextPiece = definition.DistanceToNextPiece,
+                DistanceToPreviousPiece = definition.DistanceToPreviousPiece,
+                PieceOffset = definition.PieceOffset,
+                PreviousPieceOffset = definition.PreviousPieceOffset,
+                NextPieceOffset = definition.NextPieceOffset,
+                Scale = int.TryParse(GetAttributeValue(reference, "scale_factor"), NumberStyles.Integer, CultureInfo.InvariantCulture, out var scale) ? scale : 100
+            };
+            pieces[GetAttributeValue(reference, "Type") ?? definition.PieceType] = piece;
+        }
+
+        var template = GetAttributeValue(item, "crafting_template") ?? string.Empty;
+        _equipmentTemplates.TryGetValue(template, out var templateDefinition);
+        var hiddenTypes = (GetAttributeValue(templateDefinition ?? item, "hidden_piece_types_on_holster") ?? "").Split(':');
+        var useWeapon = GetAttributeValue(templateDefinition ?? item, "use_weapon_as_holster_mesh") == "true";
+        var order = _craftingTemplateBuildOrders.TryGetValue(template, out var loadedOrder) ? loadedOrder
+            : BundledCraftingBuildOrders.TryGetValue(template, out var bundledOrder) ? bundledOrder
+            : throw new InvalidOperationException($"Crafting template '{template}' has no build order.");
+        var pivots = CalculateCraftingPivots(pieces, order, out _);
+        var weapon = new Model3DGroup();
+        foreach (var (type, piece) in pieces)
+        {
+            if (piece == null || !pivots.TryGetValue(type, out var pivot) || float.IsNaN(pivot))
+            {
+                continue;
+            }
+
+            var meshName = piece.MeshName;
+            var meshLength = piece.VisualLength;
+            var meshScale = piece.ScaleFactor;
+            if (sheathed && !useWeapon)
+            {
+                var reference = item.Descendants().First(element => element.Name.LocalName == "Piece" &&
+                    (GetAttributeValue(element, "Type") ?? "") == type);
+                _equipmentPieceDefinitions.TryGetValue(GetAttributeValue(reference, "id") ?? "", out var definition);
+                var holsterData = definition?.DescendantsAndSelf().FirstOrDefault(element => !string.IsNullOrWhiteSpace(GetAttributeValue(element, "holster_mesh")));
+                var holsterMesh = holsterData == null ? null : GetAttributeValue(holsterData, "holster_mesh");
+                if (!string.IsNullOrWhiteSpace(holsterMesh))
+                {
+                    meshName = holsterMesh;
+                    if (TryFloat(GetAttributeValue(holsterData!, "holster_mesh_length"), out var authoredLength) && authoredLength > 0)
+                        meshLength = authoredLength;
+                    var scaleType = GetAttributeValue(templateDefinition ?? item, "piece_type_to_scale_holster_with") ?? type;
+                    if (pieces.TryGetValue(scaleType, out var scalePiece) && scalePiece != null) meshScale = scalePiece.ScaleFactor;
+                }
+                // Keep a bare blade when its author supplied no scabbard mesh.
+                else if (hiddenTypes.Contains(type) && type != "Blade") continue;
+            }
+            var asset = FindEquipmentMesh(meshName)
+                ?? throw new InvalidOperationException($"Mesh '{meshName}' is not in the loaded TPAC assets.");
+            var model = LoadMeshModel(asset, out _, MeshRenderMode.CraftingPiece, meshLength);
+            var transform = new Transform3DGroup();
+            transform.Children.Add(new ScaleTransform3D(meshScale, meshScale, meshScale));
+            transform.Children.Add(new TranslateTransform3D(0, pivot * CraftingPieceUnitScale, 0));
+            model.Transform = transform;
+            weapon.Children.Add(model);
+        }
+
+        // Convert the crafting preview's centimetre scale to the armour's metre scale.
+        var equipmentScale = 0.01 / CraftingPieceUnitScale;
+        weapon.Transform = new ScaleTransform3D(equipmentScale, equipmentScale, equipmentScale);
+        return weapon;
     }
 
     private MeshAssetNode? FindMeshOption(string meshName)
@@ -1706,7 +2193,8 @@ public partial class MainWindow : Window
 
         foreach (var texture in assetPackage.Items.OfType<Texture>())
         {
-            _texturePackagePaths.TryAdd(texture.Guid, packagePath);
+            if (texture.TexturePixels != null && _texturePixelGuids.Add(texture.Guid)) _texturePackagePaths[texture.Guid] = packagePath;
+            else _texturePackagePaths.TryAdd(texture.Guid, packagePath);
         }
     }
 
@@ -1730,36 +2218,38 @@ public partial class MainWindow : Window
                 yield break;
             }
 
-            foreach (var mesh in metamesh.Meshes)
+            var meshes = GetHighestDetailMeshes(metamesh);
+            var canRender = meshes.Any(mesh => mesh.VertexStream != null || mesh.EditData != null);
+            var vertexCount = meshes.Sum(mesh => mesh.VertexCount);
+            var faceCount = meshes.Sum(mesh => mesh.FaceCount);
+            yield return new MeshAssetNode
             {
-                var displayName = string.IsNullOrWhiteSpace(mesh.Name)
-                    ? metamesh.Name
-                    : mesh.Name;
-
-                var canRender = mesh.VertexStream != null || mesh.EditData != null;
-                yield return new MeshAssetNode
-                {
-                    DisplayName = NormalizeMeshDisplayName(displayName),
-                    PackageName = packageName,
-                    SourcePath = packageFile.FullName,
-                    ByteSize = packageFile.Length,
-                    Kind = "Mesh",
-                    GroupKey = NormalizeMeshDisplayName(displayName),
-                    MetameshGuid = metamesh.Guid,
-                    MeshGuid = mesh.Guid,
-                    VertexCount = mesh.VertexCount,
-                    FaceCount = mesh.FaceCount,
-                    CanRender = canRender,
-                    Status = canRender
-                        ? $"Parsed - {mesh.VertexCount:n0} vertices - {mesh.FaceCount:n0} faces"
-                        : $"Parsed metadata - {mesh.VertexCount:n0} vertices - {mesh.FaceCount:n0} faces"
-                };
-            }
+                DisplayName = NormalizeMeshDisplayName(metamesh.Name),
+                PackageName = packageName,
+                SourcePath = packageFile.FullName,
+                ByteSize = packageFile.Length,
+                Kind = "Mesh",
+                GroupKey = NormalizeMeshDisplayName(metamesh.Name),
+                MetameshGuid = metamesh.Guid,
+                MeshGuid = meshes[0].Guid,
+                VertexCount = vertexCount,
+                FaceCount = faceCount,
+                CanRender = canRender,
+                Status = canRender
+                    ? $"Parsed - {meshes.Length} part(s) - {vertexCount:n0} vertices - {faceCount:n0} faces"
+                    : $"Parsed metadata - {vertexCount:n0} vertices - {faceCount:n0} faces"
+            };
 
             yield break;
         }
 
         yield break;
+    }
+
+    private static Mesh[] GetHighestDetailMeshes(Metamesh metamesh)
+    {
+        var lod = metamesh.Meshes.Min(mesh => mesh.Lod);
+        return metamesh.Meshes.Where(mesh => mesh.Lod == lod).ToArray();
     }
 
     private static string NormalizeMeshDisplayName(string name)
@@ -1799,73 +2289,110 @@ public partial class MainWindow : Window
     {
         if (e.NewValue is MeshAssetNode asset)
         {
-            SelectedAssetTitle.Text = asset.DisplayName;
-            SelectedAssetSubtitle.Text = $"{asset.Kind} - {asset.PackageName} - {asset.Status}";
             RenderSelectedAsset(asset);
         }
     }
 
     private void RenderSelectedAsset(MeshAssetNode asset)
     {
+        _previewWorkspace = 0;
+        SuspendTroopPose();
+        SelectedAssetTitle.Text = asset.DisplayName;
         if (asset.Kind != "Mesh" || asset.MeshGuid == Guid.Empty)
         {
             _assetModel.Children.Clear();
-            SelectedAssetSubtitle.Text = $"{asset.Kind} - {asset.PackageName} - no renderable mesh stream selected";
+            SelectedAssetSubtitle.Text = "No renderable mesh selected.";
             return;
         }
 
         try
         {
-            var model = LoadMeshModel(asset, out var renderedVertices);
+            var model = LoadMeshModel(asset, out _);
 
             _assetModel.Children.Clear();
             _assetModel.Children.Add(model);
 
-            SelectedAssetSubtitle.Text =
-                $"{asset.Kind} - {asset.PackageName} - rendered {renderedVertices:n0} vertices - {_lastMaterialStatus}";
+            SelectedAssetSubtitle.Text = "";
         }
         catch (Exception ex)
         {
             _assetModel.Children.Clear();
-            SelectedAssetSubtitle.Text = $"{asset.Kind} - {asset.PackageName} - render failed: {ex.Message}";
+            SelectedAssetSubtitle.Text = $"Unable to render this item: {ex.Message}";
         }
     }
 
-    private GeometryModel3D LoadMeshModel(
+    private Model3DGroup LoadMeshModel(
         MeshAssetNode asset,
         out int renderedVertices,
         MeshRenderMode renderMode = MeshRenderMode.AssetPreview,
         float targetLength = 0)
     {
-        var package = new AssetPackage(asset.SourcePath, loadHeaderNow: true, loadDataNow: false);
+        var package = new AssetPackage(asset.SourcePath, loadHeaderNow: true, loadDataNow: false,
+            assetTypes: PreviewAssetTypes, assetGuids: new HashSet<Guid> { asset.MetameshGuid });
         var metamesh = package.Items.OfType<Metamesh>().FirstOrDefault(item => item.Guid == asset.MetameshGuid);
-        var mesh = metamesh?.Meshes.FirstOrDefault(item => item.Guid == asset.MeshGuid);
-
-        if (mesh?.VertexStream == null && mesh?.EditData == null)
+        if (metamesh == null || metamesh.Meshes.Count == 0)
         {
             throw new InvalidOperationException("Mesh has no renderable geometry stream.");
         }
 
-        var materialResult = TryCreateTpacMaterial(package, metamesh, mesh, asset.DisplayName);
-        _lastMaterialStatus = materialResult.Status;
-        return mesh.VertexStream != null
-            ? CreateTpacMeshModel(mesh.VertexStream.Data, asset.DisplayName, materialResult.Material, renderMode, targetLength, out renderedVertices)
-            : CreateTpacEditMeshModel(mesh.EditData!.Data, asset.DisplayName, materialResult.Material, renderMode, targetLength, out renderedVertices);
+        var model = new Model3DGroup();
+        renderedVertices = 0;
+        foreach (var mesh in GetHighestDetailMeshes(metamesh))
+        {
+            if (mesh.VertexStream == null && mesh.EditData == null)
+            {
+                continue;
+            }
+
+            var materialResult = TryCreateTpacMaterial(package, metamesh, mesh, mesh.Name);
+            var part = mesh.VertexStream != null
+                ? CreateTpacMeshModel(mesh.VertexStream.Data, asset.DisplayName, materialResult.Material, MeshRenderMode.Raw, 0, out var partVertices)
+                : CreateTpacEditMeshModel(mesh.EditData!.Data, asset.DisplayName, materialResult.Material, MeshRenderMode.Raw, 0, out partVertices);
+            model.Children.Add(part);
+            renderedVertices += partVertices;
+        }
+
+        if (model.Children.Count == 0)
+        {
+            throw new InvalidOperationException("Mesh has no renderable geometry stream.");
+        }
+
+        if (renderMode != MeshRenderMode.Raw)
+        {
+            // Fit all material and cloth parts together without changing their shared origin.
+            var geometries = model.Children.Cast<GeometryModel3D>().Select(part => (MeshGeometry3D)part.Geometry).ToArray();
+            var positions = geometries.SelectMany(geometry => geometry.Positions).ToArray();
+            var transform = CreateMeshCoordinateTransform(positions, renderMode, targetLength);
+            foreach (var geometry in geometries)
+            {
+                for (var i = 0; i < geometry.Positions.Count; i++)
+                {
+                    geometry.Positions[i] = transform(geometry.Positions[i]);
+                }
+            }
+        }
+
+        return model;
     }
 
     private void ResetScene()
     {
         _scene.Children.Clear();
-        _scene.Children.Add(new AmbientLight(Color.FromRgb(92, 98, 105)));
-        _scene.Children.Add(new DirectionalLight(Color.FromRgb(238, 231, 203), new Vector3D(-0.4, -0.7, -0.45)));
-        _scene.Children.Add(new DirectionalLight(Color.FromRgb(84, 122, 160), new Vector3D(0.7, -0.25, 0.4)));
-        _scene.Children.Add(CreateGrid(18, 1));
+        // Linear light intensities keep fill/rim subordinate to the angled studio key.
+        _scene.Children.Add(new AmbientLight(Color.FromScRgb(1, 0.01f, 0.01f, 0.01f)));
+        _scene.Children.Add(new DirectionalLight(Color.FromScRgb(1, 0.48f, 0.47f, 0.45f), new Vector3D(-0.9, -0.75, 0.65)));
+        _scene.Children.Add(new DirectionalLight(Color.FromScRgb(1, 0.065f, 0.07f, 0.08f), new Vector3D(0.8, -0.3, 0.4)));
+        _scene.Children.Add(new DirectionalLight(Color.FromScRgb(1, 0.18f, 0.185f, 0.19f), new Vector3D(0.35, -0.4, -0.9)));
+        _renderer.GridModel = CreateGrid(18, 1);
+        _scene.Children.Add(_renderer.GridModel);
         _scene.Children.Add(_assetModel);
         UpdateCamera();
     }
 
     private void RenderEmptyPreview()
     {
+        _previewWorkspace = -1;
+        SuspendTroopPose();
         _assetModel.Children.Clear();
         _assetModel.Children.Add(CreateBox(new Point3D(0, 0.05, 0), 1.5, 0.1, 1.5, Color.FromRgb(60, 65, 70)));
         _assetModel.Children.Add(CreateBox(new Point3D(0, 0.75, 0), 0.72, 1.15, 0.46, Color.FromRgb(85, 92, 100)));
@@ -1875,6 +2402,8 @@ public partial class MainWindow : Window
 
     private void RenderAssetPlaceholder(MeshAssetNode asset)
     {
+        _previewWorkspace = 0;
+        SuspendTroopPose();
         _assetModel.Children.Clear();
 
         var accent = ColorFromName(asset.DisplayName);
@@ -1912,9 +2441,14 @@ public partial class MainWindow : Window
         var transform = CreateMeshCoordinateTransform(positions, renderMode, targetLength);
 
         var mesh = new MeshGeometry3D();
+        var normals = GetVertexNormals(vertexStream, positions.Length);
         for (var i = 0; i < positions.Length; i++)
         {
             mesh.Positions.Add(transform(positions[i]));
+            if (normals != null)
+            {
+                mesh.Normals.Add(normals[i]);
+            }
 
             mesh.TextureCoordinates.Add(i < vertexStream.Uv1.Length
                 ? ConvertTexturePoint(vertexStream.Uv1[i])
@@ -1929,6 +2463,7 @@ public partial class MainWindow : Window
             }
         }
 
+        StudioRenderer.RegisterSkinning(mesh, vertexStream);
         return CreateModel(mesh, material, ColorFromName(name));
     }
 
@@ -1963,9 +2498,17 @@ public partial class MainWindow : Window
         var transform = CreateMeshCoordinateTransform(rawPositions, renderMode, targetLength);
 
         var mesh = new MeshGeometry3D();
+        var normals = editData.Vertices
+            .Select(vertex => ConvertBannerlordNormal(vertex.Normal.X, vertex.Normal.Y, vertex.Normal.Z))
+            .ToArray();
+        var hasNormals = normals.All(normal => normal.LengthSquared > 0);
         for (var i = 0; i < rawPositions.Length; i++)
         {
             mesh.Positions.Add(transform(rawPositions[i]));
+            if (hasNormals)
+            {
+                mesh.Normals.Add(normals[i]);
+            }
 
             mesh.TextureCoordinates.Add(ConvertTexturePoint(editData.Vertices[i].Uv));
         }
@@ -1987,7 +2530,7 @@ public partial class MainWindow : Window
 
     private static Point ConvertTexturePoint(System.Numerics.Vector2 uv)
     {
-        return new Point(uv.X, 1 - uv.Y);
+        return new Point(uv.X, uv.Y);
     }
 
     private static Func<Point3D, Point3D> CreateMeshCoordinateTransform(
@@ -2036,7 +2579,7 @@ public partial class MainWindow : Window
             (point.Z - center.Z) * scale);
     }
 
-    private static Transform3D CreateFitTransform(Rect3D bounds)
+    private static Transform3D CreateFitTransform(Rect3D bounds, double targetSize = 4.2)
     {
         if (bounds.IsEmpty ||
             Math.Max(Math.Max(bounds.SizeX, bounds.SizeY), bounds.SizeZ) <= 0)
@@ -2049,7 +2592,7 @@ public partial class MainWindow : Window
             bounds.Y + bounds.SizeY / 2,
             bounds.Z + bounds.SizeZ / 2);
         var largestAxis = Math.Max(Math.Max(bounds.SizeX, bounds.SizeY), bounds.SizeZ);
-        var scale = 4.2 / largestAxis;
+        var scale = targetSize / largestAxis;
 
         var transform = new Transform3DGroup();
         transform.Children.Add(new TranslateTransform3D(-center.X, -center.Y, -center.Z));
@@ -2105,8 +2648,9 @@ public partial class MainWindow : Window
                         continue;
                     }
 
-                    return new MaterialLoadResult(new DiffuseMaterial(brush),
-                        $"texture: applied {texture.Name} ({texture.Width}x{texture.Height}, {texture.Format}, score {TextureScore(texture)})");
+                    var litMaterial = CreateLitMaterial(material, textures, brush, out var lightingStatus);
+                    return new MaterialLoadResult(litMaterial,
+                        $"texture: applied {texture.Name} ({texture.Width}x{texture.Height}, {texture.Format}, score {TextureScore(texture)}); {lightingStatus}");
                 }
             }
 
@@ -2134,8 +2678,9 @@ public partial class MainWindow : Window
                         continue;
                     }
 
-                    return new MaterialLoadResult(new DiffuseMaterial(brush),
-                        $"texture: applied dependency {texture.Name} ({texture.Width}x{texture.Height}, {texture.Format}, score {TextureScore(texture)})");
+                    var litMaterial = CreateLitMaterial(material, textures, brush, out var lightingStatus);
+                    return new MaterialLoadResult(litMaterial,
+                        $"texture: applied dependency {texture.Name} ({texture.Width}x{texture.Height}, {texture.Format}, score {TextureScore(texture)}); {lightingStatus}");
                 }
             }
 
@@ -2305,7 +2850,7 @@ public partial class MainWindow : Window
             return null;
         }
 
-        var package = LoadLookupPackage(packagePath);
+        var package = LoadLookupPackage(packagePath, guid);
         return package?.Items.OfType<TpacTool.Lib.Material>().FirstOrDefault(item => item.Guid == guid);
     }
 
@@ -2328,13 +2873,14 @@ public partial class MainWindow : Window
             return null;
         }
 
-        var package = LoadLookupPackage(packagePath);
+        var package = LoadLookupPackage(packagePath, guid);
         return package?.Items.OfType<Texture>().FirstOrDefault(item => item.Guid == guid);
     }
 
-    private AssetPackage? LoadLookupPackage(string packagePath)
+    private AssetPackage? LoadLookupPackage(string packagePath, Guid assetGuid)
     {
-        if (_lookupPackageCache.TryGetValue(packagePath, out var package))
+        var key = (Path.GetFullPath(packagePath).ToUpperInvariant(), assetGuid);
+        if (_lookupPackageCache.TryGetValue(key, out var package))
         {
             return package;
         }
@@ -2344,8 +2890,9 @@ public partial class MainWindow : Window
             return null;
         }
 
-        package = new AssetPackage(packagePath, loadHeaderNow: true, loadDataNow: false);
-        _lookupPackageCache[packagePath] = package;
+        package = new AssetPackage(packagePath, loadHeaderNow: true, loadDataNow: false,
+            assetTypes: PreviewAssetTypes, assetGuids: new HashSet<Guid> { assetGuid });
+        _lookupPackageCache[key] = package;
         return package;
     }
 
@@ -2448,7 +2995,54 @@ public partial class MainWindow : Window
                name.EndsWith("_occlusion", StringComparison.Ordinal);
     }
 
+    private System.Windows.Media.Media3D.Material CreateLitMaterial(
+        TpacTool.Lib.Material source,
+        IReadOnlyDictionary<Guid, Texture> textures,
+        ImageBrush diffuseBrush,
+        out string status)
+    {
+        var diffuse = new DiffuseMaterial(diffuseBrush);
+        status = "no metallic/gloss map";
+        try
+        {
+            Texture? GetMap(int slot)
+            {
+                return source.Textures.TryGetValue(slot, out var reference)
+                    ? ResolveTexture(textures, reference.Guid) : null;
+            }
+            var texture = source.ExtraMaterialSettings.SpecularCoef > 0 ? GetMap(4) : null;
+            var packedMap = texture != null && IsUsableTexture(texture) ? CreateTextureBitmap(texture) : null;
+            var normalTexture = GetMap(2);
+            var normalMap = normalTexture != null && IsUsableTexture(normalTexture) ? CreateTextureBitmap(normalTexture) : null;
+            var flags = source.ShaderMaterialFlags;
+            var usesColours = flags.Contains("use_tableau_blending", StringComparer.OrdinalIgnoreCase) ||
+                flags.Contains("use_colormapping", StringComparer.OrdinalIgnoreCase) ||
+                flags.Contains("use_double_colormap_with_mask_texture", StringComparer.OrdinalIgnoreCase);
+            var colourTexture = GetMap(1);
+            var colourMask = colourTexture != null && IsUsableTexture(colourTexture) ? CreateTextureBitmap(colourTexture) : null;
+            var tableauTexture = usesColours && flags.Contains("use_tableau_mask_as_separate_texture", StringComparer.OrdinalIgnoreCase) ? GetMap(10) : null;
+            var tableauMask = tableauTexture != null && IsUsableTexture(tableauTexture) ? CreateTextureBitmap(tableauTexture) : null;
+            StudioRenderer.RegisterMaterial(diffuse, (BitmapSource)diffuseBrush.ImageSource, packedMap, normalMap,
+                normalTexture?.Format == TextureFormat.BC5,
+                source.ExtraMaterialSettings.SpecularCoef, source.ExtraMaterialSettings.GlossCoef, flags, colourMask, tableauMask);
+            status = packedMap == null ? "no metallic/gloss map" : $"metallic/gloss: {texture!.Name}";
+            if (normalMap != null) status += $"; normal: {normalTexture!.Name}";
+            return diffuse;
+        }
+        catch (Exception ex)
+        {
+            status = $"metallic/gloss map failed ({ex.Message})";
+            return diffuse;
+        }
+    }
+
     private static ImageBrush? CreateTextureBrush(Texture texture)
+    {
+        var bitmap = CreateTextureBitmap(texture);
+        return bitmap == null ? null : CreateImageBrush(bitmap);
+    }
+
+    private static BitmapSource? CreateTextureBitmap(Texture texture)
     {
         if (texture.TexturePixels?.Data.PrimaryRawImage is not { Length: > 0 } pixels)
         {
@@ -2457,46 +3051,33 @@ public partial class MainWindow : Window
 
         var width = checked((int)texture.Width);
         var height = checked((int)texture.Height);
-#pragma warning disable CS0612
-        var decoded = TextureUtil.DecodeTextureData(pixels, width, height, texture.Format);
-#pragma warning restore CS0612
-        var buffer = new byte[width * height * 4];
-
-        for (var i = 0; i < decoded.Length; i++)
+        var bitmap = new WriteableBitmap(width, height, 96, 96, PixelFormats.Bgra32, null);
+        bitmap.Lock();
+        try
         {
-            var offset = i * 4;
-            buffer[offset] = ToByte(decoded[i].B);
-            buffer[offset + 1] = ToByte(decoded[i].G);
-            buffer[offset + 2] = ToByte(decoded[i].R);
-            buffer[offset + 3] = ToByte(decoded[i].A);
+            var writer = new TextureUtil.ARGB32Writer(bitmap.BackBuffer, width, height, bitmap.BackBufferStride);
+            TextureUtil.DecodeTextureDataToWriter(pixels, width, height, texture.Format, writer);
+            bitmap.AddDirtyRect(new Int32Rect(0, 0, width, height));
         }
-
-        var bitmap = BitmapSource.Create(
-            width,
-            height,
-            96,
-            96,
-            PixelFormats.Bgra32,
-            null,
-            buffer,
-            width * 4);
+        finally
+        {
+            bitmap.Unlock();
+        }
         bitmap.Freeze();
+        return bitmap;
+    }
 
+    private static ImageBrush CreateImageBrush(BitmapSource bitmap)
+    {
         var brush = new ImageBrush(bitmap)
         {
             TileMode = TileMode.Tile,
             Viewport = new Rect(0, 0, 1, 1),
-            ViewportUnits = BrushMappingMode.RelativeToBoundingBox,
+            ViewportUnits = BrushMappingMode.Absolute,
             Stretch = Stretch.Fill
         };
         brush.Freeze();
         return brush;
-    }
-
-    private static byte ToByte(float value)
-    {
-        var byteValue = value <= 1f ? value * 255f : value;
-        return (byte)Math.Clamp((int)Math.Round(byteValue), 0, 255);
     }
 
     private static bool IsValidIndex(int index, int length)
@@ -2525,6 +3106,35 @@ public partial class MainWindow : Window
     private static Point3D ConvertBannerlordPoint(float x, float y, float z)
     {
         return new Point3D(x, z, -y);
+    }
+
+    private static Vector3D[]? GetVertexNormals(VertexStreamData stream, int vertexCount)
+    {
+        Vector3D[] normals;
+        if (stream.Normals?.Length == vertexCount)
+        {
+            normals = stream.Normals.Select(normal => ConvertBannerlordNormal(normal.X, normal.Y, normal.Z)).ToArray();
+        }
+        else if (stream.CompressedNormals?.Length == vertexCount)
+        {
+            normals = stream.CompressedNormals.Select(normal => ConvertBannerlordNormal((float)normal.X, (float)normal.Y, (float)normal.Z)).ToArray();
+        }
+        else
+        {
+            return null;
+        }
+        return normals.All(normal => normal.LengthSquared > 0) ? normals : null;
+    }
+
+    private static Vector3D ConvertBannerlordNormal(float x, float y, float z)
+    {
+        var normal = new Vector3D(x, z, -y);
+        if (!double.IsFinite(normal.LengthSquared) || normal.LengthSquared < 1e-12)
+        {
+            return new Vector3D();
+        }
+        normal.Normalize();
+        return normal;
     }
 
     private static Model3DGroup CreateGrid(int halfExtent, double step)

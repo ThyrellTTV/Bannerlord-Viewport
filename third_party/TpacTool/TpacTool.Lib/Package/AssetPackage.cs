@@ -13,6 +13,9 @@ namespace TpacTool.Lib
 		private const int TPAC_LATEST_VERSION = 2;
 
 		private Guid _guid;
+		private readonly ISet<Guid> _assetTypes;
+		private readonly ISet<Guid> _assetGuids;
+		private readonly bool _indexOnly;
 
 		public Guid Guid
 		{
@@ -68,8 +71,12 @@ namespace TpacTool.Lib
 			}
 		}
 
-		public AssetPackage([NotNull] string filePath, bool loadHeaderNow = true, bool loadDataNow = false)
+		public AssetPackage([NotNull] string filePath, bool loadHeaderNow = true, bool loadDataNow = false,
+			ISet<Guid> assetTypes = null, bool indexOnly = false, ISet<Guid> assetGuids = null)
 		{
+			_assetTypes = assetTypes;
+			_assetGuids = assetGuids;
+			_indexOnly = indexOnly;
 			//if (!System.IO.File.Exists(filePath))
 			//	throw new FileNotFoundException("Tpac file is not found:", filePath);
 			File = new FileInfo(filePath);
@@ -131,8 +138,15 @@ namespace TpacTool.Lib
 			for (int i = 0; i < resourceNum; i++)
 			{
 				var typeGuid = stream.ReadGuid();
-				TypedAssetFactory.CreateTypedAsset(typeGuid, out var assetItem);
-				assetItem.Guid = stream.ReadGuid();
+				var resourceGuid = stream.ReadGuid();
+				var selected = (_assetTypes == null || _assetTypes.Contains(typeGuid)) &&
+					(_assetGuids == null || _assetGuids.Contains(resourceGuid));
+				AssetItem assetItem;
+				if (selected && !_indexOnly)
+					TypedAssetFactory.CreateTypedAsset(typeGuid, out assetItem);
+				else
+					assetItem = new AssetItem(typeGuid);
+				assetItem.Guid = resourceGuid;
 
 				uint assetVersion = 0;
 				if (version > 1)
@@ -167,7 +181,7 @@ namespace TpacTool.Lib
 					segments[j] = segment;
 				}
 				assetItem.ConsumeDataSegments(segments);
-				if (loadDataIntoMemory)
+				if (loadDataIntoMemory && selected && !_indexOnly)
 				{
 					foreach (var segment in segments)
 					{
@@ -192,7 +206,8 @@ namespace TpacTool.Lib
 					assetItem.UnknownDependences.Add(deps);
 				}
 
-				Items.Add(assetItem);
+				if (selected)
+					Items.Add(assetItem);
 			}
 
 			if (loadDataIntoMemory)

@@ -1,6 +1,5 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.Diagnostics;
 using System.IO;
 using System.Numerics;
 using System.Text;
@@ -230,7 +229,6 @@ namespace TpacTool.Lib
 
 		private static ThreadLocal<long> DEBUG_POSITION = new ThreadLocal<long>();
 
-		[Conditional("DEBUG")]
 		public static void RecordPosition(this BinaryReader reader)
 		{
 			DEBUG_POSITION.Value = reader.BaseStream.Position;
@@ -239,10 +237,25 @@ namespace TpacTool.Lib
 		public static void AssertLength(this BinaryReader reader, long readLength)
 		{
 			var length = reader.BaseStream.Position - DEBUG_POSITION.Value;
-			if (length != readLength)
+			if (length > readLength)
 			{
 				throw new InvalidDataException(
 					$"TPAC metadata length mismatch. Expected {readLength:n0} bytes, read {length:n0} bytes at stream position {reader.BaseStream.Position:n0}.");
+			}
+
+			if (length == readLength)
+			{
+				return;
+			}
+
+			var unreadLength = readLength - length;
+			if (reader.BaseStream.CanSeek)
+			{
+				reader.BaseStream.Seek(unreadLength, SeekOrigin.Current);
+			}
+			else
+			{
+				reader.ReadBytes((int)unreadLength);
 			}
 		}
 	}
