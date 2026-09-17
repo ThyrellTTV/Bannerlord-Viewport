@@ -132,7 +132,7 @@ public partial class MainWindow : Window
 
     private void UpdateTableauColourEditorVisibility()
     {
-        if (_isUpdatingTableauColours || TableauColourPanel == null) return;
+        if (_isUpdatingTableauColours || _batchRenderRunning || TableauColourPanel == null) return;
         var enabled = _previewWorkspace is 0 or 1 && StudioRenderer.HasFactionColourBlending(_assetModel);
         TableauColourPanel.Visibility = enabled && WorkspaceTabs.SelectedIndex == _previewWorkspace
             ? Visibility.Visible : Visibility.Collapsed;
@@ -2130,11 +2130,15 @@ public partial class MainWindow : Window
             option.DisplayName.Equals(normalizedMeshName, StringComparison.OrdinalIgnoreCase));
     }
 
+    private static bool ShouldParseAsset(Guid type, string name) =>
+        type != Metamesh.TYPE_GUID || !name.TrimStart().StartsWith("clo_", StringComparison.OrdinalIgnoreCase);
+
     private void PopulatePackageAssets(TpacPackageNode package, FileInfo info)
     {
         try
         {
-            var assetPackage = new AssetPackage(info.FullName, loadHeaderNow: true, loadDataNow: false);
+            var assetPackage = new AssetPackage(info.FullName, loadHeaderNow: true, loadDataNow: false,
+                assetFilter: ShouldParseAsset);
             IndexPackageLookups(assetPackage, info.FullName);
             var modelAssets = assetPackage.Items
                 .SelectMany(asset => CreateModelNodes(asset, package.DisplayName, info))
@@ -2328,7 +2332,7 @@ public partial class MainWindow : Window
         float targetLength = 0)
     {
         var package = new AssetPackage(asset.SourcePath, loadHeaderNow: true, loadDataNow: false,
-            assetTypes: PreviewAssetTypes, assetGuids: new HashSet<Guid> { asset.MetameshGuid });
+            assetTypes: PreviewAssetTypes, assetGuids: new HashSet<Guid> { asset.MetameshGuid }, assetFilter: ShouldParseAsset);
         var metamesh = package.Items.OfType<Metamesh>().FirstOrDefault(item => item.Guid == asset.MetameshGuid);
         if (metamesh == null || metamesh.Meshes.Count == 0)
         {
@@ -2891,7 +2895,7 @@ public partial class MainWindow : Window
         }
 
         package = new AssetPackage(packagePath, loadHeaderNow: true, loadDataNow: false,
-            assetTypes: PreviewAssetTypes, assetGuids: new HashSet<Guid> { assetGuid });
+            assetTypes: PreviewAssetTypes, assetGuids: new HashSet<Guid> { assetGuid }, assetFilter: ShouldParseAsset);
         _lookupPackageCache[key] = package;
         return package;
     }

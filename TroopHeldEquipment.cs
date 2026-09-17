@@ -30,6 +30,7 @@ public partial class MainWindow
 
     private MeshAssetNode? FindEquipmentMesh(string name)
     {
+        if (!ShouldParseAsset(Metamesh.TYPE_GUID, name)) return null;
         if (FindMeshOption(name) is { } selected) return selected;
         if (!_equipmentDependenciesIndexed)
         {
@@ -38,7 +39,7 @@ public partial class MainWindow
                 {
                     AssetPackage package;
                     // Index names and GUIDs without decoding unrelated asset metadata.
-                    try { package = new AssetPackage(path, indexOnly: true); }
+                    try { package = new AssetPackage(path, indexOnly: true, assetFilter: ShouldParseAsset); }
                     catch (Exception ex) { throw new InvalidDataException($"Could not index equipment dependency '{Path.GetFileName(path)}': {ex.Message}", ex); }
                     var info = new FileInfo(path);
                     foreach (var asset in package.Items)

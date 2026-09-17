@@ -271,6 +271,7 @@
                                 <Grid.RowDefinitions>
                                     <RowDefinition Height="Auto" />
                                     <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
                                 </Grid.RowDefinitions>
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="*" />
@@ -292,6 +293,13 @@
                                            Foreground="{StaticResource MutedBrush}"
                                            FontSize="12"
                                            Text="No packages loaded." />
+                                <Button x:Name="BatchRenderButton" Grid.Row="2" Grid.ColumnSpan="2" Margin="0,10,0,0"
+                                        Click="BatchRender_Click" ToolTip="Batch render parsed meshes">
+                                    <StackPanel Orientation="Horizontal">
+                                        <TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xE722;" Margin="0,0,8,0" VerticalAlignment="Center" />
+                                        <TextBlock Text="Batch Render" />
+                                    </StackPanel>
+                                </Button>
                             </Grid>
 
                             <Border Grid.Row="1"

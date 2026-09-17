@@ -33,6 +33,7 @@ internal sealed class StudioRenderer : IDisposable
     internal Model3D? GridModel { get; set; }
     private Model3D? _posedModel;
     private Matrix4x4[]? _poseMatrices;
+    internal (Model3D? Model, Matrix4x4[]? Matrices) PoseState => (_posedModel, _poseMatrices);
     private System.Windows.Media.Color _primaryColour = Colors.White;
     private System.Windows.Media.Color _secondaryColour = Colors.White;
     private bool _coloursEnabled;
@@ -210,6 +211,17 @@ internal sealed class StudioRenderer : IDisposable
     {
         var encoded = linear <= 0.0031308 ? linear * 12.92 : 1.055 * Math.Pow(linear, 1 / 2.4) - 0.055;
         return (byte)Math.Clamp(Math.Round(encoded * 255), 0, 255);
+    }
+
+    internal void ScaleLighting(float intensity)
+    {
+        foreach (var element in _viewport.Items)
+            if (element.SceneNode is HelixToolkit.SharpDX.Model.Scene.LightNode light)
+            {
+                var colour = light.Color;
+                light.Color = new Color4(colour.Red * intensity, colour.Green * intensity, colour.Blue * intensity, colour.Alpha);
+            }
+        _viewport.InvalidateRender();
     }
 
     internal static void RegisterSkinning(WpfMesh mesh, TpacTool.Lib.VertexStreamData stream)

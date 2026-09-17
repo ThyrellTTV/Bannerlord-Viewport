@@ -16,6 +16,7 @@ namespace TpacTool.Lib
 		private readonly ISet<Guid> _assetTypes;
 		private readonly ISet<Guid> _assetGuids;
 		private readonly bool _indexOnly;
+		private readonly Func<Guid, string, bool> _assetFilter;
 
 		public Guid Guid
 		{
@@ -72,11 +73,13 @@ namespace TpacTool.Lib
 		}
 
 		public AssetPackage([NotNull] string filePath, bool loadHeaderNow = true, bool loadDataNow = false,
-			ISet<Guid> assetTypes = null, bool indexOnly = false, ISet<Guid> assetGuids = null)
+			ISet<Guid> assetTypes = null, bool indexOnly = false, ISet<Guid> assetGuids = null,
+			Func<Guid, string, bool> assetFilter = null)
 		{
 			_assetTypes = assetTypes;
 			_assetGuids = assetGuids;
 			_indexOnly = indexOnly;
+			_assetFilter = assetFilter;
 			//if (!System.IO.File.Exists(filePath))
 			//	throw new FileNotFoundException("Tpac file is not found:", filePath);
 			File = new FileInfo(filePath);
@@ -139,8 +142,13 @@ namespace TpacTool.Lib
 			{
 				var typeGuid = stream.ReadGuid();
 				var resourceGuid = stream.ReadGuid();
+				uint assetVersion = 0;
+				if (version > 1)
+					assetVersion = stream.ReadUInt32();
+				var assetName = stream.ReadSizedString();
 				var selected = (_assetTypes == null || _assetTypes.Contains(typeGuid)) &&
-					(_assetGuids == null || _assetGuids.Contains(resourceGuid));
+					(_assetGuids == null || _assetGuids.Contains(resourceGuid)) &&
+					(_assetFilter == null || _assetFilter(typeGuid, assetName));
 				AssetItem assetItem;
 				if (selected && !_indexOnly)
 					TypedAssetFactory.CreateTypedAsset(typeGuid, out assetItem);
@@ -148,15 +156,15 @@ namespace TpacTool.Lib
 					assetItem = new AssetItem(typeGuid);
 				assetItem.Guid = resourceGuid;
 
-				uint assetVersion = 0;
-				if (version > 1)
-					assetVersion = stream.ReadUInt32();
 				assetItem.Version = assetVersion;
-				assetItem.Name = stream.ReadSizedString();
+				assetItem.Name = assetName;
 
 				var metadataSize = stream.ReadUInt64();
 				stream.RecordPosition();
-				assetItem.ReadMetadata(stream, (int)metadataSize);
+				if (selected)
+					assetItem.ReadMetadata(stream, (int)metadataSize);
+				else
+					stream.BaseStream.Seek((long)metadataSize, SeekOrigin.Current);
 				stream.AssertLength((long)metadataSize);
 				var unknownMetadataChecknum = stream.ReadInt64();
 

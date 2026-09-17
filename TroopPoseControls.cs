@@ -216,6 +216,7 @@ public partial class MainWindow
 
     private void ApplyTroopPose()
     {
+        if (_batchRenderRunning) return;
         if (_poseAvailable && _poseClip != null && _troopPoses != null)
             _renderer.SetPose(_assetModel, _troopPoses.Evaluate(_poseClip, _poseFrame));
         else _renderer.SetPose(null, null);
