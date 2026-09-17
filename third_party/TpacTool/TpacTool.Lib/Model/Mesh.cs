@@ -123,7 +123,10 @@ namespace TpacTool.Lib
 			VertexCount = stream.ReadInt32();
 			SkinDataSize = stream.ReadInt32();
 			int boundingBoxType = stream.ReadInt32();
-			Debug.Assert(boundingBoxType == 0); // should always 0
+			if (boundingBoxType != 0)
+			{
+				throw new InvalidDataException($"Unsupported mesh bounding box type: {boundingBoxType}.");
+			}
 			BoundingBox = new BoundingBox(stream);
 			UnknownInt2 = stream.ReadInt32();
 			MaterialFlags = stream.ReadStringList();

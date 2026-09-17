@@ -112,7 +112,10 @@ namespace TpacTool.Lib
 			{
 				if (boneParents[i] >= 0)
 				{
-					Debug.Assert(boneParents[i] < num);
+					if (boneParents[i] >= num)
+					{
+						throw new InvalidDataException($"Invalid skeleton parent index {boneParents[i]} for bone {i}.");
+					}
 					Bones[i].Parent = Bones[boneParents[i]];
 				}
 			}

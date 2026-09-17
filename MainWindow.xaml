@@ -483,69 +483,37 @@
                                         <RowDefinition Height="Auto" />
                                         <RowDefinition Height="Auto" />
                                         <RowDefinition Height="Auto" />
-                                        <RowDefinition Height="Auto" />
-                                        <RowDefinition Height="Auto" />
-                                        <RowDefinition Height="Auto" />
-                                        <RowDefinition Height="Auto" />
                                     </Grid.RowDefinitions>
 
                                     <TextBlock Text="Blade" Foreground="{StaticResource MutedBrush}" Margin="0,6" />
-                                    <TextBox x:Name="CraftingBladeSearch"
-                                             Grid.Column="1"
-                                             Margin="0,2"
-                                             Tag="Blade"
-                                             TextChanged="CraftingPieceSearch_TextChanged" />
                                     <ComboBox x:Name="CraftingBladeCombo"
+                                              Grid.Column="1"
+                                              Margin="0,2,0,8"
+                                              DisplayMemberPath="Id"
+                                              SelectionChanged="CraftingPieceCombo_SelectionChanged" />
+
+                                    <TextBlock Grid.Row="1" Text="Guard" Foreground="{StaticResource MutedBrush}" Margin="0,6" />
+                                    <ComboBox x:Name="CraftingGuardCombo"
                                               Grid.Row="1"
                                               Grid.Column="1"
                                               Margin="0,2,0,8"
                                               DisplayMemberPath="Id"
-                                              IsEditable="False"
                                               SelectionChanged="CraftingPieceCombo_SelectionChanged" />
 
-                                    <TextBlock Grid.Row="2" Text="Guard" Foreground="{StaticResource MutedBrush}" Margin="0,6" />
-                                    <TextBox x:Name="CraftingGuardSearch"
-                                             Grid.Row="2"
-                                             Grid.Column="1"
-                                             Margin="0,2"
-                                             Tag="Guard"
-                                             TextChanged="CraftingPieceSearch_TextChanged" />
-                                    <ComboBox x:Name="CraftingGuardCombo"
-                                              Grid.Row="3"
-                                              Grid.Column="1"
-                                              Margin="0,2,0,8"
-                                              DisplayMemberPath="Id"
-                                              IsEditable="False"
-                                              SelectionChanged="CraftingPieceCombo_SelectionChanged" />
-
-                                    <TextBlock Grid.Row="4" Text="Handle" Foreground="{StaticResource MutedBrush}" Margin="0,6" />
-                                    <TextBox x:Name="CraftingHandleSearch"
-                                             Grid.Row="4"
-                                             Grid.Column="1"
-                                             Margin="0,2"
-                                             Tag="Handle"
-                                             TextChanged="CraftingPieceSearch_TextChanged" />
+                                    <TextBlock Grid.Row="2" Text="Handle" Foreground="{StaticResource MutedBrush}" Margin="0,6" />
                                     <ComboBox x:Name="CraftingHandleCombo"
-                                              Grid.Row="5"
+                                              Grid.Row="2"
                                               Grid.Column="1"
                                               Margin="0,2,0,8"
                                               DisplayMemberPath="Id"
-                                              IsEditable="False"
                                               SelectionChanged="CraftingPieceCombo_SelectionChanged" />
 
-                                    <TextBlock Grid.Row="6" Text="Pommel" Foreground="{StaticResource MutedBrush}" Margin="0,6" />
-                                    <TextBox x:Name="CraftingPommelSearch"
-                                             Grid.Row="6"
-                                             Grid.Column="1"
-                                             Margin="0,2"
-                                             Tag="Pommel"
-                                             TextChanged="CraftingPieceSearch_TextChanged" />
+                                    <TextBlock Grid.Row="3" Text="Pommel" Foreground="{StaticResource MutedBrush}" Margin="0,6" />
                                     <ComboBox x:Name="CraftingPommelCombo"
-                                              Grid.Row="7"
+                                              Grid.Row="3"
                                               Grid.Column="1"
                                               Margin="0,2"
                                               DisplayMemberPath="Id"
-                                              IsEditable="False"
                                               SelectionChanged="CraftingPieceCombo_SelectionChanged" />
                                 </Grid>
 
@@ -558,6 +526,7 @@
                                     <Button Click="ApplyCraftingWeapon_Click" Content="Apply" />
                                     <Button Margin="8,0,0,0" Click="ClearCraftingWeapon_Click" Content="Clear" />
                                 </StackPanel>
+
                             </StackPanel>
                         </ScrollViewer>
                     </TabItem>
@@ -575,6 +544,8 @@
                             <ColumnDefinition Width="Auto" />
                         </Grid.ColumnDefinitions>
                         <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
                             <RowDefinition Height="Auto" />
                             <RowDefinition Height="Auto" />
                             <RowDefinition Height="Auto" />
@@ -596,6 +567,21 @@
                                    Grid.Column="1"
                                    FontWeight="Bold"
                                    Text="not loaded" />
+                        <CheckBox x:Name="SaveSettingsCheckBox"
+                                  Grid.Row="3"
+                                  Grid.ColumnSpan="2"
+                                  Margin="0,10,0,0"
+                                  Checked="SaveSettingsCheckBox_Changed"
+                                  Unchecked="SaveSettingsCheckBox_Changed"
+                                  Content="Save settings"
+                                  Foreground="#D8D4C1" />
+                        <TextBlock x:Name="SettingsStatusText"
+                                   Grid.Row="4"
+                                   Grid.ColumnSpan="2"
+                                   Margin="0,4,0,0"
+                                   Foreground="{StaticResource MutedBrush}"
+                                   FontSize="11"
+                                   Text="Settings are not saved." />
                     </Grid>
                 </Border>
             </Grid>
@@ -635,6 +621,97 @@
                                Foreground="#A9B0B8"
                                Text="Choose an AssetPackages folder to begin." />
                 </StackPanel>
+            </Border>
+
+            <Border x:Name="CraftingEditorPanel"
+                    HorizontalAlignment="Right"
+                    VerticalAlignment="Top"
+                    Margin="24"
+                    Width="380"
+                    Background="#DD0B1016"
+                    BorderBrush="#23303B"
+                    BorderThickness="1"
+                    CornerRadius="4"
+                    Padding="14,12"
+                    Visibility="Collapsed">
+                <ScrollViewer MaxHeight="690" VerticalScrollBarVisibility="Auto">
+                    <StackPanel>
+                        <TextBlock Text="OFFSET EDITOR"
+                                   Foreground="{StaticResource AccentBrush}"
+                                   FontSize="11"
+                                   FontWeight="Bold" />
+                        <TextBlock x:Name="CraftingActivePieceText"
+                                   Margin="0,8,0,0"
+                                   Text="Select a piece to edit."
+                                   FontWeight="SemiBold" />
+                        <TextBlock Text="Step"
+                                   Margin="0,10,0,4"
+                                   Foreground="{StaticResource MutedBrush}" />
+                        <StackPanel Orientation="Horizontal">
+                            <RadioButton Content="0.1" Foreground="#F3EFD9" Tag="0.1" GroupName="CraftingStep" Margin="0,0,12,0" Checked="CraftingStepRadio_Checked" />
+                            <RadioButton Content="0.5" Foreground="#F3EFD9" Tag="0.5" GroupName="CraftingStep" Margin="0,0,12,0" Checked="CraftingStepRadio_Checked" />
+                            <RadioButton Content="1" Foreground="#F3EFD9" Tag="1" GroupName="CraftingStep" Margin="0,0,12,0" IsChecked="True" Checked="CraftingStepRadio_Checked" />
+                            <RadioButton Content="5" Foreground="#F3EFD9" Tag="5" GroupName="CraftingStep" Checked="CraftingStepRadio_Checked" />
+                        </StackPanel>
+
+                        <TextBlock Text="piece_offset" Margin="0,10,0,4" Foreground="{StaticResource MutedBrush}" />
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <TextBox x:Name="CraftingPieceOffsetBox" LostFocus="CraftingOffsetBox_LostFocus" KeyDown="CraftingOffsetBox_KeyDown" />
+                            <Button Grid.Column="1" Margin="8,0,0,0" Content="-" Tag="piece_offset,-1" Click="CraftingOffsetStep_Click" />
+                            <Button Grid.Column="2" Margin="6,0,0,0" Content="+" Tag="piece_offset,1" Click="CraftingOffsetStep_Click" />
+                        </Grid>
+
+                        <TextBlock Text="previous_piece_offset" Margin="0,10,0,4" Foreground="{StaticResource MutedBrush}" />
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <TextBox x:Name="CraftingPreviousOffsetBox" LostFocus="CraftingOffsetBox_LostFocus" KeyDown="CraftingOffsetBox_KeyDown" />
+                            <Button Grid.Column="1" Margin="8,0,0,0" Content="-" Tag="previous_piece_offset,-1" Click="CraftingOffsetStep_Click" />
+                            <Button Grid.Column="2" Margin="6,0,0,0" Content="+" Tag="previous_piece_offset,1" Click="CraftingOffsetStep_Click" />
+                        </Grid>
+
+                        <TextBlock Text="next_piece_offset" Margin="0,10,0,4" Foreground="{StaticResource MutedBrush}" />
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <TextBox x:Name="CraftingNextOffsetBox" LostFocus="CraftingOffsetBox_LostFocus" KeyDown="CraftingOffsetBox_KeyDown" />
+                            <Button Grid.Column="1" Margin="8,0,0,0" Content="-" Tag="next_piece_offset,-1" Click="CraftingOffsetStep_Click" />
+                            <Button Grid.Column="2" Margin="6,0,0,0" Content="+" Tag="next_piece_offset,1" Click="CraftingOffsetStep_Click" />
+                        </Grid>
+
+                        <TextBlock Text="scale_factor (%)" Margin="0,10,0,4" Foreground="{StaticResource MutedBrush}" />
+                        <TextBox x:Name="CraftingScaleBox" LostFocus="CraftingOffsetBox_LostFocus" KeyDown="CraftingOffsetBox_KeyDown" />
+
+                        <TextBlock Text="XML OUTPUT"
+                                   Margin="0,14,0,8"
+                                   Foreground="{StaticResource AccentBrush}"
+                                   FontSize="11"
+                                   FontWeight="Bold" />
+                        <TextBox x:Name="CraftingXmlOutputBox"
+                                 Height="130"
+                                 IsReadOnly="True"
+                                 TextWrapping="Wrap"
+                                 VerticalScrollBarVisibility="Auto"
+                                 FontFamily="Consolas" />
+                        <Button Margin="0,8,0,0"
+                                Click="CopyCraftingBuildData_Click"
+                                Content="Copy BuildData to Clipboard" />
+                        <Button Margin="0,8,0,0"
+                                Click="ExportCraftingOffsets_Click"
+                                Content="Export tuned offsets (JSON)" />
+                    </StackPanel>
+                </ScrollViewer>
             </Border>
 
             <Border HorizontalAlignment="Right"

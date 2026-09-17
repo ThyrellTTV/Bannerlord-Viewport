@@ -16,9 +16,10 @@ namespace TpacTool.Lib
 			int length = stream.ReadInt32();
 			if (length == 0)
 				return String.Empty;
-#if DEBUG
-			Debug.Assert(length < 0xFFFF);
-#endif
+			if (length < 0 || length >= 0xFFFF)
+			{
+				throw new InvalidDataException($"Invalid TPAC string length: {length:n0}.");
+			}
 			var bytes = stream.ReadBytes(length);
 			return Encoding.UTF8.GetString(bytes);
 		}
@@ -235,11 +236,14 @@ namespace TpacTool.Lib
 			DEBUG_POSITION.Value = reader.BaseStream.Position;
 		}
 
-		[Conditional("DEBUG")]
 		public static void AssertLength(this BinaryReader reader, long readLength)
 		{
 			var length = reader.BaseStream.Position - DEBUG_POSITION.Value;
-			Debug.Assert(length == readLength);
+			if (length != readLength)
+			{
+				throw new InvalidDataException(
+					$"TPAC metadata length mismatch. Expected {readLength:n0} bytes, read {length:n0} bytes at stream position {reader.BaseStream.Position:n0}.");
+			}
 		}
 	}
 }

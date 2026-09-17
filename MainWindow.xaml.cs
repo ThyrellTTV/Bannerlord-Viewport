@@ -1,12 +1,14 @@
 using System.Collections.ObjectModel;
 using System.Globalization;
 using System.IO;
+using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Input;
 using System.Windows.Media;
+using System.Windows.Media.Imaging;
 using System.Windows.Media.Media3D;
 using System.Xml.Linq;
 using Microsoft.Win32;
@@ -16,6 +18,12 @@ namespace LOTRAOM_Viewport;
 
 public partial class MainWindow : Window
 {
+    private const double AssetPreviewSize = 2.8;
+    private const double CraftingPieceUnitScale = 0.035;
+    private static readonly string SettingsDirectory = Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments),
+        "Bannerlord Viewport");
+    private static readonly string SettingsFilePath = Path.Combine(SettingsDirectory, "settings.json");
     private static readonly string[] EquipmentSlots = ["Helmet", "Cape", "Body", "Arm", "Leg", "Item0", "Item1"];
     private static readonly string[] CraftingSlots = ["Blade", "Guard", "Handle", "Pommel"];
     private static readonly (string Type, int Order)[] DefaultCraftingBuildOrder =
@@ -49,14 +57,24 @@ public partial class MainWindow : Window
     private readonly Dictionary<string, string> _craftingSearchText = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<ComboBox, ObservableCollection<MeshAssetNode>> _filteredMeshOptions = [];
     private readonly Dictionary<TextBox, ComboBox> _equipmentTextBoxes = [];
+    private readonly Dictionary<ComboBox, ObservableCollection<CraftingPieceNode>> _filteredCraftingOptions = [];
+    private readonly Dictionary<TextBox, ComboBox> _craftingTextBoxes = [];
+    private readonly Dictionary<Guid, string> _materialPackagePaths = [];
+    private readonly Dictionary<Guid, string> _texturePackagePaths = [];
+    private readonly Dictionary<string, AssetPackage> _lookupPackageCache = new(StringComparer.OrdinalIgnoreCase);
     private bool _isUpdatingComboFilters;
     private bool _isUpdatingCraftingCombos;
+    private bool _isUpdatingCraftingEditor;
+    private bool _isLoadingSavedSettings;
     private CraftingPieceNode? _craftingBlade;
     private CraftingPieceNode? _craftingGuard;
     private CraftingPieceNode? _craftingHandle;
     private CraftingPieceNode? _craftingPommel;
+    private CraftingPieceNode? _activeCraftingPiece;
+    private float _craftingStepSize = 1f;
     private readonly Model3DGroup _scene = new();
     private readonly Model3DGroup _assetModel = new();
+    private string _lastMaterialStatus = "texture: not attempted";
     private Point _lastMousePosition;
     private bool _isOrbiting;
     private double _yaw = 34;
@@ -70,9 +88,11 @@ public partial class MainWindow : Window
         AssetTree.ItemsSource = _packages;
         TroopList.ItemsSource = _troops;
         BindEquipmentDropdowns();
+        BindCraftingDropdowns();
         ModelViewport.Children.Add(new ModelVisual3D { Content = _scene });
         ResetScene();
         RenderEmptyPreview();
+        LoadSavedSettingsIfAvailable();
     }
 
     private void ChooseAssetPackagesFolder_Click(object sender, RoutedEventArgs e)
@@ -89,6 +109,7 @@ public partial class MainWindow : Window
         }
 
         LoadAssetPackages(dialog.FolderName);
+        SaveSettingsIfEnabled();
     }
 
     private void LoadAssetPackages(string folderPath)
@@ -96,6 +117,9 @@ public partial class MainWindow : Window
         AssetPathBox.Text = folderPath;
         _packages.Clear();
         _allPackages.Clear();
+        _materialPackagePaths.Clear();
+        _texturePackagePaths.Clear();
+        _lookupPackageCache.Clear();
 
         if (!Directory.Exists(folderPath))
         {
@@ -146,6 +170,131 @@ public partial class MainWindow : Window
             SelectedAssetTitle.Text = "Packages loaded";
             SelectedAssetSubtitle.Text = "Select a mesh candidate from the left.";
         }
+    }
+
+    private void SaveSettingsCheckBox_Changed(object sender, RoutedEventArgs e)
+    {
+        if (_isLoadingSavedSettings)
+        {
+            return;
+        }
+
+        if (SaveSettingsCheckBox.IsChecked == true)
+        {
+            SaveSettings();
+        }
+        else
+        {
+            SaveSettings();
+            SettingsStatusText.Text = "Settings saving is off.";
+        }
+    }
+
+    private void LoadSavedSettingsIfAvailable()
+    {
+        if (!File.Exists(SettingsFilePath))
+        {
+            SettingsStatusText.Text = "Settings are not saved.";
+            return;
+        }
+
+        try
+        {
+            var settings = JsonSerializer.Deserialize<AppSettings>(File.ReadAllText(SettingsFilePath));
+            if (settings?.SaveSettings != true)
+            {
+                SettingsStatusText.Text = "Settings saving is off.";
+                return;
+            }
+
+            _isLoadingSavedSettings = true;
+            try
+            {
+                SaveSettingsCheckBox.IsChecked = true;
+            }
+            finally
+            {
+                _isLoadingSavedSettings = false;
+            }
+
+            var loaded = new List<string>();
+            if (!string.IsNullOrWhiteSpace(settings.AssetPackagesPath) &&
+                Directory.Exists(settings.AssetPackagesPath))
+            {
+                LoadAssetPackages(settings.AssetPackagesPath);
+                loaded.Add("AssetPackages");
+            }
+
+            if (!string.IsNullOrWhiteSpace(settings.CraftingPiecesPath) &&
+                File.Exists(settings.CraftingPiecesPath))
+            {
+                LoadCraftingPieces(settings.CraftingPiecesPath);
+                loaded.Add("crafting pieces");
+            }
+
+            if (!string.IsNullOrWhiteSpace(settings.CraftingTemplatesPath) &&
+                File.Exists(settings.CraftingTemplatesPath))
+            {
+                LoadCraftingTemplates(settings.CraftingTemplatesPath);
+                loaded.Add("crafting templates");
+            }
+
+            SettingsStatusText.Text = loaded.Count == 0
+                ? "Saved settings found, but paths are missing."
+                : $"Loaded saved {string.Join(", ", loaded)}.";
+        }
+        catch (Exception ex)
+        {
+            _isLoadingSavedSettings = false;
+            SettingsStatusText.Text = $"Could not load settings: {ex.Message}";
+        }
+    }
+
+    private void SaveSettingsIfEnabled()
+    {
+        if (SaveSettingsCheckBox.IsChecked == true && !_isLoadingSavedSettings)
+        {
+            SaveSettings();
+        }
+    }
+
+    private void SaveSettings()
+    {
+        try
+        {
+            Directory.CreateDirectory(SettingsDirectory);
+            var settings = new AppSettings
+            {
+                SaveSettings = SaveSettingsCheckBox.IsChecked == true,
+                AssetPackagesPath = GetPersistablePath(AssetPathBox.Text),
+                CraftingPiecesPath = GetPersistablePath(CraftingPiecesPathBox.Text),
+                CraftingTemplatesPath = GetPersistablePath(CraftingTemplatesPathBox.Text)
+            };
+
+            File.WriteAllText(
+                SettingsFilePath,
+                JsonSerializer.Serialize(settings, new JsonSerializerOptions { WriteIndented = true }));
+
+            SettingsStatusText.Text = settings.SaveSettings
+                ? $"Settings saved to {SettingsFilePath}"
+                : "Settings saving is off.";
+        }
+        catch (Exception ex)
+        {
+            SettingsStatusText.Text = $"Could not save settings: {ex.Message}";
+        }
+    }
+
+    private static string? GetPersistablePath(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value) ||
+            value.StartsWith("Select ", StringComparison.OrdinalIgnoreCase) ||
+            value.StartsWith("Optional ", StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
+        return value;
     }
 
     private void AssetSearchBox_TextChanged(object sender, TextChangedEventArgs e)
@@ -293,6 +442,177 @@ public partial class MainWindow : Window
         _isUpdatingComboFilters = false;
     }
 
+    private void BindCraftingDropdowns()
+    {
+        foreach (var (comboBox, slot) in GetCraftingCombos())
+        {
+            var filteredOptions = new ObservableCollection<CraftingPieceNode>();
+            _filteredCraftingOptions[comboBox] = filteredOptions;
+            comboBox.Tag = slot;
+            comboBox.ItemsSource = filteredOptions;
+            comboBox.IsEditable = true;
+            comboBox.IsTextSearchEnabled = false;
+            comboBox.StaysOpenOnEdit = true;
+            TextSearch.SetTextPath(comboBox, nameof(CraftingPieceNode.Id));
+            comboBox.Loaded += CraftingCombo_Loaded;
+            comboBox.DropDownOpened += CraftingCombo_DropDownOpened;
+            comboBox.GotKeyboardFocus += CraftingCombo_ActivateSelectedPiece;
+            comboBox.AddHandler(ComboBoxItem.PreviewMouseLeftButtonUpEvent,
+                new MouseButtonEventHandler(CraftingComboItem_Click), true);
+        }
+    }
+
+    private IEnumerable<(ComboBox ComboBox, string Slot)> GetCraftingCombos()
+    {
+        yield return (CraftingBladeCombo, "Blade");
+        yield return (CraftingGuardCombo, "Guard");
+        yield return (CraftingHandleCombo, "Handle");
+        yield return (CraftingPommelCombo, "Pommel");
+    }
+
+    private void CraftingCombo_Loaded(object sender, RoutedEventArgs e)
+    {
+        if (sender is ComboBox comboBox)
+        {
+            AttachCraftingComboTextBox(comboBox);
+        }
+    }
+
+    private void CraftingCombo_DropDownOpened(object? sender, EventArgs e)
+    {
+        if (sender is ComboBox comboBox)
+        {
+            AttachCraftingComboTextBox(comboBox);
+            ActivateSelectedCraftingPiece(comboBox);
+            FilterCraftingCombo(comboBox, comboBox.Text, restoreSelection: true);
+            if (comboBox.Template.FindName("PART_EditableTextBox", comboBox) is TextBox textBox)
+            {
+                textBox.SelectAll();
+            }
+        }
+    }
+
+    private void CraftingCombo_ActivateSelectedPiece(object sender, RoutedEventArgs e)
+    {
+        if (sender is ComboBox comboBox)
+        {
+            ActivateSelectedCraftingPiece(comboBox);
+        }
+    }
+
+    private void CraftingComboItem_Click(object sender, MouseButtonEventArgs e)
+    {
+        if (sender is not ComboBox comboBox ||
+            ItemsControl.ContainerFromElement(comboBox, e.OriginalSource as DependencyObject) is not ComboBoxItem item ||
+            item.DataContext is not CraftingPieceNode piece)
+        {
+            return;
+        }
+
+        comboBox.SelectedItem = piece;
+        comboBox.IsDropDownOpen = false;
+        ApplyCraftingPieceSelection(comboBox, piece == CraftingPieceNode.Empty ? null : piece);
+        e.Handled = true;
+    }
+
+    private void ActivateSelectedCraftingPiece(ComboBox comboBox)
+    {
+        if (_isUpdatingCraftingCombos)
+        {
+            return;
+        }
+
+        if (comboBox.SelectedItem is CraftingPieceNode piece &&
+            piece != CraftingPieceNode.Empty)
+        {
+            SetActiveCraftingPiece(piece);
+        }
+    }
+
+    private void AttachCraftingComboTextBox(ComboBox comboBox)
+    {
+        comboBox.ApplyTemplate();
+        if (comboBox.Template.FindName("PART_EditableTextBox", comboBox) is not TextBox textBox ||
+            _craftingTextBoxes.ContainsKey(textBox))
+        {
+            return;
+        }
+
+        _craftingTextBoxes[textBox] = comboBox;
+        textBox.TextChanged += CraftingCombo_TextChanged;
+    }
+
+    private void CraftingCombo_TextChanged(object sender, TextChangedEventArgs e)
+    {
+        if (_isUpdatingCraftingCombos ||
+            sender is not TextBox textBox ||
+            !_craftingTextBoxes.TryGetValue(textBox, out var comboBox))
+        {
+            return;
+        }
+
+        if (comboBox.SelectedItem is CraftingPieceNode selectedPiece &&
+            selectedPiece != CraftingPieceNode.Empty &&
+            textBox.Text.Equals(selectedPiece.Id, StringComparison.OrdinalIgnoreCase))
+        {
+            ActivateSelectedCraftingPiece(comboBox);
+            return;
+        }
+
+        FilterCraftingCombo(comboBox, textBox.Text, restoreSelection: false);
+        if (comboBox.IsKeyboardFocusWithin)
+        {
+            comboBox.IsDropDownOpen = true;
+        }
+    }
+
+    private void FilterCraftingCombo(ComboBox comboBox, string? searchText, bool restoreSelection)
+    {
+        if (!_filteredCraftingOptions.TryGetValue(comboBox, out var filteredOptions) ||
+            comboBox.Tag is not string slot)
+        {
+            return;
+        }
+
+        var normalizedSearchText = (searchText ?? string.Empty).Trim();
+        var selectedPiece = comboBox.SelectedItem as CraftingPieceNode;
+        if (normalizedSearchText.Equals(CraftingPieceNode.Empty.Id, StringComparison.OrdinalIgnoreCase) ||
+            selectedPiece != null && normalizedSearchText.Equals(selectedPiece.Id, StringComparison.OrdinalIgnoreCase))
+        {
+            normalizedSearchText = string.Empty;
+        }
+
+        _craftingSearchText[slot] = normalizedSearchText;
+        var selectedId = selectedPiece?.Id;
+        var typedText = searchText ?? string.Empty;
+        var matches = FilterCraftingPieces(slot).Take(300).ToArray();
+
+        _isUpdatingCraftingCombos = true;
+        filteredOptions.Clear();
+        filteredOptions.Add(CraftingPieceNode.Empty);
+        foreach (var match in matches)
+        {
+            filteredOptions.Add(match);
+        }
+
+        if (restoreSelection && !string.IsNullOrWhiteSpace(selectedId))
+        {
+            comboBox.SelectedItem = filteredOptions.FirstOrDefault(piece =>
+                piece.Id.Equals(selectedId, StringComparison.OrdinalIgnoreCase));
+        }
+        else if (!restoreSelection)
+        {
+            comboBox.Text = typedText;
+            if (comboBox.Template.FindName("PART_EditableTextBox", comboBox) is TextBox textBox)
+            {
+                textBox.Text = typedText;
+                textBox.CaretIndex = typedText.Length;
+            }
+        }
+
+        _isUpdatingCraftingCombos = false;
+    }
+
     private void ChooseTroopXml_Click(object sender, RoutedEventArgs e)
     {
         var dialog = new OpenFileDialog
@@ -322,6 +642,7 @@ public partial class MainWindow : Window
         if (dialog.ShowDialog(this) == true)
         {
             LoadCraftingPieces(dialog.FileName);
+            SaveSettingsIfEnabled();
         }
     }
 
@@ -337,6 +658,7 @@ public partial class MainWindow : Window
         if (dialog.ShowDialog(this) == true)
         {
             LoadCraftingTemplates(dialog.FileName);
+            SaveSettingsIfEnabled();
         }
     }
 
@@ -488,10 +810,10 @@ public partial class MainWindow : Window
         };
 
         _isUpdatingCraftingCombos = true;
-        PopulateCraftingCombo(CraftingBladeCombo, "Blade");
-        PopulateCraftingCombo(CraftingGuardCombo, "Guard");
-        PopulateCraftingCombo(CraftingHandleCombo, "Handle");
-        PopulateCraftingCombo(CraftingPommelCombo, "Pommel");
+        PopulateCraftingCombo(CraftingBladeCombo, "Blade", previous["Blade"]);
+        PopulateCraftingCombo(CraftingGuardCombo, "Guard", previous["Guard"]);
+        PopulateCraftingCombo(CraftingHandleCombo, "Handle", previous["Handle"]);
+        PopulateCraftingCombo(CraftingPommelCombo, "Pommel", previous["Pommel"]);
         _craftingBlade = RestoreCraftingSelection(CraftingBladeCombo, previous["Blade"]);
         _craftingGuard = RestoreCraftingSelection(CraftingGuardCombo, previous["Guard"]);
         _craftingHandle = RestoreCraftingSelection(CraftingHandleCombo, previous["Handle"]);
@@ -499,17 +821,25 @@ public partial class MainWindow : Window
         _isUpdatingCraftingCombos = false;
     }
 
-    private void PopulateCraftingCombo(ComboBox comboBox, string slot)
+    private void PopulateCraftingCombo(ComboBox comboBox, string slot, string? previousId)
     {
-        comboBox.Items.Clear();
-        comboBox.Items.Add(CraftingPieceNode.Empty);
+        if (!_filteredCraftingOptions.TryGetValue(comboBox, out var filteredOptions))
+        {
+            return;
+        }
+
+        filteredOptions.Clear();
+        filteredOptions.Add(CraftingPieceNode.Empty);
 
         foreach (var piece in FilterCraftingPieces(slot))
         {
-            comboBox.Items.Add(piece);
+            filteredOptions.Add(piece);
         }
 
-        comboBox.SelectedIndex = 0;
+        comboBox.SelectedItem = string.IsNullOrWhiteSpace(previousId)
+            ? CraftingPieceNode.Empty
+            : filteredOptions.FirstOrDefault(piece => piece.Id.Equals(previousId, StringComparison.OrdinalIgnoreCase)) ??
+              CraftingPieceNode.Empty;
     }
 
     private IEnumerable<CraftingPieceNode> FilterCraftingPieces(string slot)
@@ -532,14 +862,19 @@ public partial class MainWindow : Window
             .OrderBy(piece => piece.Id);
     }
 
-    private static CraftingPieceNode? RestoreCraftingSelection(ComboBox comboBox, string? selectedId)
+    private CraftingPieceNode? RestoreCraftingSelection(ComboBox comboBox, string? selectedId)
     {
         if (string.IsNullOrWhiteSpace(selectedId))
         {
             return null;
         }
 
-        foreach (var item in comboBox.Items.OfType<CraftingPieceNode>())
+        if (!_filteredCraftingOptions.TryGetValue(comboBox, out var filteredOptions))
+        {
+            return null;
+        }
+
+        foreach (var item in filteredOptions)
         {
             if (item.Id.Equals(selectedId, StringComparison.OrdinalIgnoreCase))
             {
@@ -583,6 +918,20 @@ public partial class MainWindow : Window
         {
             selected = null;
         }
+        else if (selected == null)
+        {
+            return;
+        }
+
+        ApplyCraftingPieceSelection(comboBox, selected);
+    }
+
+    private void ApplyCraftingPieceSelection(ComboBox comboBox, CraftingPieceNode? selected)
+    {
+        if (comboBox.Tag is string slot)
+        {
+            _craftingSearchText[slot] = string.Empty;
+        }
 
         if (comboBox == CraftingBladeCombo)
         {
@@ -601,6 +950,7 @@ public partial class MainWindow : Window
             _craftingPommel = selected;
         }
 
+        SetActiveCraftingPiece(selected);
         RenderCraftingWeaponPreview();
     }
 
@@ -621,14 +971,192 @@ public partial class MainWindow : Window
         _craftingGuard = null;
         _craftingHandle = null;
         _craftingPommel = null;
+        SetActiveCraftingPiece(null);
 
         if (CraftingBladeCombo != null)
         {
-            CraftingBladeCombo.SelectedIndex = 0;
-            CraftingGuardCombo.SelectedIndex = 0;
-            CraftingHandleCombo.SelectedIndex = 0;
-            CraftingPommelCombo.SelectedIndex = 0;
+            CraftingBladeCombo.SelectedItem = CraftingPieceNode.Empty;
+            CraftingGuardCombo.SelectedItem = CraftingPieceNode.Empty;
+            CraftingHandleCombo.SelectedItem = CraftingPieceNode.Empty;
+            CraftingPommelCombo.SelectedItem = CraftingPieceNode.Empty;
         }
+    }
+
+    private void SetActiveCraftingPiece(CraftingPieceNode? piece)
+    {
+        _activeCraftingPiece = piece;
+        CraftingEditorPanel.Visibility = piece == null ? Visibility.Collapsed : Visibility.Visible;
+        _isUpdatingCraftingEditor = true;
+        CraftingActivePieceText.Text = piece?.Id ?? "Select a piece to edit.";
+        CraftingPieceOffsetBox.Text = piece == null ? string.Empty : FormatCraftingFloat(piece.PieceOffset);
+        CraftingPreviousOffsetBox.Text = piece == null ? string.Empty : FormatCraftingFloat(piece.PreviousPieceOffset);
+        CraftingNextOffsetBox.Text = piece == null ? string.Empty : FormatCraftingFloat(piece.NextPieceOffset);
+        CraftingScaleBox.Text = piece == null ? string.Empty : piece.Scale.ToString(CultureInfo.InvariantCulture);
+        _isUpdatingCraftingEditor = false;
+        UpdateCraftingXmlOutput();
+    }
+
+    private void CraftingStepRadio_Checked(object sender, RoutedEventArgs e)
+    {
+        if (sender is RadioButton radioButton &&
+            TryFloat(radioButton.Tag as string, out var step))
+        {
+            _craftingStepSize = step;
+        }
+    }
+
+    private void CraftingOffsetBox_LostFocus(object sender, RoutedEventArgs e)
+    {
+        CommitCraftingOffsetBoxes(sender as TextBox);
+    }
+
+    private void CraftingOffsetBox_KeyDown(object sender, KeyEventArgs e)
+    {
+        if (e.Key == Key.Enter)
+        {
+            CommitCraftingOffsetBoxes(sender as TextBox);
+            e.Handled = true;
+        }
+    }
+
+    private void CraftingOffsetStep_Click(object sender, RoutedEventArgs e)
+    {
+        if (_activeCraftingPiece == null ||
+            sender is not Button button ||
+            button.Tag is not string tag)
+        {
+            return;
+        }
+
+        var parts = tag.Split(',');
+        if (parts.Length != 2 || !TryFloat(parts[1], out var direction))
+        {
+            return;
+        }
+
+        var delta = direction * _craftingStepSize;
+        switch (parts[0])
+        {
+            case "piece_offset":
+                _activeCraftingPiece.PieceOffset += delta;
+                break;
+            case "previous_piece_offset":
+                _activeCraftingPiece.PreviousPieceOffset += delta;
+                break;
+            case "next_piece_offset":
+                _activeCraftingPiece.NextPieceOffset += delta;
+                break;
+        }
+
+        SetActiveCraftingPiece(_activeCraftingPiece);
+        RenderCraftingWeaponPreview();
+    }
+
+    private void CommitCraftingOffsetBoxes(TextBox? sourceBox = null)
+    {
+        if (_isUpdatingCraftingEditor || _activeCraftingPiece == null)
+        {
+            return;
+        }
+
+        if (TryFloat(CraftingPieceOffsetBox.Text, out var pieceOffset))
+        {
+            _activeCraftingPiece.PieceOffset = pieceOffset;
+        }
+
+        if (TryFloat(CraftingPreviousOffsetBox.Text, out var previousOffset))
+        {
+            _activeCraftingPiece.PreviousPieceOffset = previousOffset;
+        }
+
+        if (TryFloat(CraftingNextOffsetBox.Text, out var nextOffset))
+        {
+            _activeCraftingPiece.NextPieceOffset = nextOffset;
+        }
+
+        if (int.TryParse(CraftingScaleBox.Text, NumberStyles.Integer, CultureInfo.InvariantCulture, out var scale) &&
+            scale > 0)
+        {
+            _activeCraftingPiece.Scale = scale;
+        }
+
+        SetActiveCraftingPiece(_activeCraftingPiece);
+        RenderCraftingWeaponPreview();
+    }
+
+    private void UpdateCraftingXmlOutput()
+    {
+        if (_activeCraftingPiece == null)
+        {
+            CraftingXmlOutputBox.Text = string.Empty;
+            return;
+        }
+
+        CraftingXmlOutputBox.Text =
+            $"<!-- {_activeCraftingPiece.Id} -->{Environment.NewLine}" +
+            $"<BuildData{Environment.NewLine}" +
+            $"    piece_offset=\"{FormatCraftingFloat(_activeCraftingPiece.PieceOffset)}\"{Environment.NewLine}" +
+            $"    previous_piece_offset=\"{FormatCraftingFloat(_activeCraftingPiece.PreviousPieceOffset)}\"{Environment.NewLine}" +
+            $"    next_piece_offset=\"{FormatCraftingFloat(_activeCraftingPiece.NextPieceOffset)}\" />";
+    }
+
+    private void CopyCraftingBuildData_Click(object sender, RoutedEventArgs e)
+    {
+        if (!string.IsNullOrWhiteSpace(CraftingXmlOutputBox.Text))
+        {
+            Clipboard.SetText(CraftingXmlOutputBox.Text);
+        }
+    }
+
+    private void ExportCraftingOffsets_Click(object sender, RoutedEventArgs e)
+    {
+        var dirty = _craftingPieces.Where(piece => piece.IsDirty).ToArray();
+        if (dirty.Length == 0)
+        {
+            CraftingSummaryText.Text = "No tuned crafting offsets to export.";
+            return;
+        }
+
+        var dialog = new SaveFileDialog
+        {
+            Title = "Export tuned crafting offsets",
+            Filter = "JSON files (*.json)|*.json|All files (*.*)|*.*",
+            FileName = "crafting_offset_tuning.json"
+        };
+
+        if (dialog.ShowDialog(this) != true)
+        {
+            return;
+        }
+
+        var payload = dirty.Select(piece => new
+        {
+            id = piece.Id,
+            piece_type = piece.PieceType,
+            mesh = piece.MeshName,
+            original = new
+            {
+                piece_offset = piece.OriginalPieceOffset,
+                previous_piece_offset = piece.OriginalPreviousPieceOffset,
+                next_piece_offset = piece.OriginalNextPieceOffset,
+                scale_factor = piece.OriginalScale
+            },
+            tuned = new
+            {
+                piece_offset = piece.PieceOffset,
+                previous_piece_offset = piece.PreviousPieceOffset,
+                next_piece_offset = piece.NextPieceOffset,
+                scale_factor = piece.Scale
+            }
+        });
+
+        File.WriteAllText(dialog.FileName, JsonSerializer.Serialize(payload, new JsonSerializerOptions { WriteIndented = true }));
+        CraftingSummaryText.Text = $"Exported {dirty.Length} tuned piece(s).";
+    }
+
+    private static string FormatCraftingFloat(float value)
+    {
+        return value.ToString("0.##", CultureInfo.InvariantCulture);
     }
 
     private void RenderCraftingWeaponPreview()
@@ -653,6 +1181,7 @@ public partial class MainWindow : Window
         }
 
         var pivots = CalculateCraftingPivots(out var weaponLength);
+        var assembledWeapon = new Model3DGroup();
         var rendered = 0;
         var missing = 0;
 
@@ -674,15 +1203,28 @@ public partial class MainWindow : Window
 
             try
             {
-                var model = LoadMeshModel(meshAsset, out _);
-                model.Transform = new TranslateTransform3D(0, pivot * 0.035, 0);
-                _assetModel.Children.Add(model);
+                var model = LoadMeshModel(meshAsset, out _, MeshRenderMode.CraftingPiece, piece.VisualLength);
+                var transforms = new Transform3DGroup();
+                if (piece.Scale != 100)
+                {
+                    transforms.Children.Add(new ScaleTransform3D(piece.ScaleFactor, piece.ScaleFactor, piece.ScaleFactor));
+                }
+
+                transforms.Children.Add(new TranslateTransform3D(0, pivot * CraftingPieceUnitScale, 0));
+                model.Transform = transforms;
+                assembledWeapon.Children.Add(model);
                 rendered++;
             }
             catch
             {
                 missing++;
             }
+        }
+
+        if (rendered > 0)
+        {
+            assembledWeapon.Transform = CreateFitTransform(assembledWeapon.Bounds);
+            _assetModel.Children.Add(assembledWeapon);
         }
 
         CraftingWeaponLengthText.Text = float.IsNaN(weaponLength)
@@ -821,7 +1363,10 @@ public partial class MainWindow : Window
             DistanceToPreviousPiece = distanceToPrevious,
             PieceOffset = ReadBuildDataFloat(buildData, "piece_offset"),
             PreviousPieceOffset = ReadBuildDataFloat(buildData, "previous_piece_offset"),
-            NextPieceOffset = ReadBuildDataFloat(buildData, "next_piece_offset")
+            NextPieceOffset = ReadBuildDataFloat(buildData, "next_piece_offset"),
+            OriginalPieceOffset = ReadBuildDataFloat(buildData, "piece_offset"),
+            OriginalPreviousPieceOffset = ReadBuildDataFloat(buildData, "previous_piece_offset"),
+            OriginalNextPieceOffset = ReadBuildDataFloat(buildData, "next_piece_offset")
         };
     }
 
@@ -1098,11 +1643,12 @@ public partial class MainWindow : Window
             option.DisplayName.Equals(normalizedMeshName, StringComparison.OrdinalIgnoreCase));
     }
 
-    private static void PopulatePackageAssets(TpacPackageNode package, FileInfo info)
+    private void PopulatePackageAssets(TpacPackageNode package, FileInfo info)
     {
         try
         {
             var assetPackage = new AssetPackage(info.FullName, loadHeaderNow: true, loadDataNow: false);
+            IndexPackageLookups(assetPackage, info.FullName);
             var modelAssets = assetPackage.Items
                 .SelectMany(asset => CreateModelNodes(asset, package.DisplayName, info))
                 .GroupBy(asset => asset.GroupKey)
@@ -1148,6 +1694,19 @@ public partial class MainWindow : Window
                 GroupKey = package.DisplayName,
                 Status = $"Could not parse TPAC header: {ex.Message}"
             });
+        }
+    }
+
+    private void IndexPackageLookups(AssetPackage assetPackage, string packagePath)
+    {
+        foreach (var material in assetPackage.Items.OfType<TpacTool.Lib.Material>())
+        {
+            _materialPackagePaths.TryAdd(material.Guid, packagePath);
+        }
+
+        foreach (var texture in assetPackage.Items.OfType<Texture>())
+        {
+            _texturePackagePaths.TryAdd(texture.Guid, packagePath);
         }
     }
 
@@ -1263,7 +1822,7 @@ public partial class MainWindow : Window
             _assetModel.Children.Add(model);
 
             SelectedAssetSubtitle.Text =
-                $"{asset.Kind} - {asset.PackageName} - rendered {renderedVertices:n0} vertices";
+                $"{asset.Kind} - {asset.PackageName} - rendered {renderedVertices:n0} vertices - {_lastMaterialStatus}";
         }
         catch (Exception ex)
         {
@@ -1272,7 +1831,11 @@ public partial class MainWindow : Window
         }
     }
 
-    private static GeometryModel3D LoadMeshModel(MeshAssetNode asset, out int renderedVertices)
+    private GeometryModel3D LoadMeshModel(
+        MeshAssetNode asset,
+        out int renderedVertices,
+        MeshRenderMode renderMode = MeshRenderMode.AssetPreview,
+        float targetLength = 0)
     {
         var package = new AssetPackage(asset.SourcePath, loadHeaderNow: true, loadDataNow: false);
         var metamesh = package.Items.OfType<Metamesh>().FirstOrDefault(item => item.Guid == asset.MetameshGuid);
@@ -1283,9 +1846,11 @@ public partial class MainWindow : Window
             throw new InvalidOperationException("Mesh has no renderable geometry stream.");
         }
 
+        var materialResult = TryCreateTpacMaterial(package, metamesh, mesh, asset.DisplayName);
+        _lastMaterialStatus = materialResult.Status;
         return mesh.VertexStream != null
-            ? CreateTpacMeshModel(mesh.VertexStream.Data, asset.DisplayName, out renderedVertices)
-            : CreateTpacEditMeshModel(mesh.EditData!.Data, asset.DisplayName, out renderedVertices);
+            ? CreateTpacMeshModel(mesh.VertexStream.Data, asset.DisplayName, materialResult.Material, renderMode, targetLength, out renderedVertices)
+            : CreateTpacEditMeshModel(mesh.EditData!.Data, asset.DisplayName, materialResult.Material, renderMode, targetLength, out renderedVertices);
     }
 
     private void ResetScene()
@@ -1324,7 +1889,13 @@ public partial class MainWindow : Window
         _assetModel.Children.Add(CreateBox(new Point3D(0.95, 0.95, -0.08), 0.12, 1.25, 0.54, Color.FromRgb(28, 34, 42), -10));
     }
 
-    private static GeometryModel3D CreateTpacMeshModel(VertexStreamData vertexStream, string name, out int renderedVertices)
+    private static GeometryModel3D CreateTpacMeshModel(
+        VertexStreamData vertexStream,
+        string name,
+        System.Windows.Media.Media3D.Material? material,
+        MeshRenderMode renderMode,
+        float targetLength,
+        out int renderedVertices)
     {
         var positions = GetVertexPositions(vertexStream).ToArray();
         if (positions.Length == 0)
@@ -1338,23 +1909,16 @@ public partial class MainWindow : Window
         }
 
         renderedVertices = positions.Length;
-        var minX = positions.Min(point => point.X);
-        var minY = positions.Min(point => point.Y);
-        var minZ = positions.Min(point => point.Z);
-        var maxX = positions.Max(point => point.X);
-        var maxY = positions.Max(point => point.Y);
-        var maxZ = positions.Max(point => point.Z);
-        var center = new Point3D((minX + maxX) / 2, (minY + maxY) / 2, (minZ + maxZ) / 2);
-        var largestAxis = Math.Max(Math.Max(maxX - minX, maxY - minY), maxZ - minZ);
-        var scale = largestAxis <= 0 ? 1 : 2.8 / largestAxis;
+        var transform = CreateMeshCoordinateTransform(positions, renderMode, targetLength);
 
         var mesh = new MeshGeometry3D();
-        foreach (var point in positions)
+        for (var i = 0; i < positions.Length; i++)
         {
-            mesh.Positions.Add(new Point3D(
-                (point.X - center.X) * scale,
-                (point.Y - center.Y) * scale + 1.2,
-                (point.Z - center.Z) * scale));
+            mesh.Positions.Add(transform(positions[i]));
+
+            mesh.TextureCoordinates.Add(i < vertexStream.Uv1.Length
+                ? ConvertTexturePoint(vertexStream.Uv1[i])
+                : new Point());
         }
 
         foreach (var index in vertexStream.Indices)
@@ -1365,11 +1929,16 @@ public partial class MainWindow : Window
             }
         }
 
-        var model = CreateModel(mesh, ColorFromName(name));
-        return model;
+        return CreateModel(mesh, material, ColorFromName(name));
     }
 
-    private static GeometryModel3D CreateTpacEditMeshModel(MeshEditData editData, string name, out int renderedVertices)
+    private static GeometryModel3D CreateTpacEditMeshModel(
+        MeshEditData editData,
+        string name,
+        System.Windows.Media.Media3D.Material? material,
+        MeshRenderMode renderMode,
+        float targetLength,
+        out int renderedVertices)
     {
         if (editData.Positions.Length == 0 || editData.Vertices.Length == 0 || editData.Faces.Length == 0)
         {
@@ -1391,23 +1960,14 @@ public partial class MainWindow : Window
             .ToArray();
 
         renderedVertices = rawPositions.Length;
-        var minX = rawPositions.Min(point => point.X);
-        var minY = rawPositions.Min(point => point.Y);
-        var minZ = rawPositions.Min(point => point.Z);
-        var maxX = rawPositions.Max(point => point.X);
-        var maxY = rawPositions.Max(point => point.Y);
-        var maxZ = rawPositions.Max(point => point.Z);
-        var center = new Point3D((minX + maxX) / 2, (minY + maxY) / 2, (minZ + maxZ) / 2);
-        var largestAxis = Math.Max(Math.Max(maxX - minX, maxY - minY), maxZ - minZ);
-        var scale = largestAxis <= 0 ? 1 : 2.8 / largestAxis;
+        var transform = CreateMeshCoordinateTransform(rawPositions, renderMode, targetLength);
 
         var mesh = new MeshGeometry3D();
-        foreach (var point in rawPositions)
+        for (var i = 0; i < rawPositions.Length; i++)
         {
-            mesh.Positions.Add(new Point3D(
-                (point.X - center.X) * scale,
-                (point.Y - center.Y) * scale + 1.2,
-                (point.Z - center.Z) * scale));
+            mesh.Positions.Add(transform(rawPositions[i]));
+
+            mesh.TextureCoordinates.Add(ConvertTexturePoint(editData.Vertices[i].Uv));
         }
 
         foreach (var face in editData.Faces)
@@ -1422,7 +1982,521 @@ public partial class MainWindow : Window
             }
         }
 
-        return CreateModel(mesh, ColorFromName(name));
+        return CreateModel(mesh, material, ColorFromName(name));
+    }
+
+    private static Point ConvertTexturePoint(System.Numerics.Vector2 uv)
+    {
+        return new Point(uv.X, 1 - uv.Y);
+    }
+
+    private static Func<Point3D, Point3D> CreateMeshCoordinateTransform(
+        Point3D[] positions,
+        MeshRenderMode renderMode,
+        float targetLength)
+    {
+        if (renderMode == MeshRenderMode.Raw)
+        {
+            return point => point;
+        }
+
+        var minX = positions.Min(point => point.X);
+        var minY = positions.Min(point => point.Y);
+        var minZ = positions.Min(point => point.Z);
+        var maxX = positions.Max(point => point.X);
+        var maxY = positions.Max(point => point.Y);
+        var maxZ = positions.Max(point => point.Z);
+        var center = new Point3D((minX + maxX) / 2, (minY + maxY) / 2, (minZ + maxZ) / 2);
+        var sizeX = maxX - minX;
+        var sizeY = maxY - minY;
+        var sizeZ = maxZ - minZ;
+        var largestAxis = Math.Max(Math.Max(sizeX, sizeY), sizeZ);
+
+        if (renderMode == MeshRenderMode.CraftingPiece)
+        {
+            var weaponAxisLength = sizeY > 0 ? sizeY : largestAxis;
+            var craftingScale = weaponAxisLength <= 0
+                ? CraftingPieceUnitScale
+                : Math.Max(targetLength, 1) * CraftingPieceUnitScale / weaponAxisLength;
+
+            return point => new Point3D(
+                point.X * craftingScale,
+                point.Y * craftingScale,
+                point.Z * craftingScale);
+        }
+
+        var scale = largestAxis <= 0 ? 1 : renderMode switch
+        {
+            _ => AssetPreviewSize / largestAxis
+        };
+
+        return point => new Point3D(
+            (point.X - center.X) * scale,
+            (point.Y - center.Y) * scale + 1.2,
+            (point.Z - center.Z) * scale);
+    }
+
+    private static Transform3D CreateFitTransform(Rect3D bounds)
+    {
+        if (bounds.IsEmpty ||
+            Math.Max(Math.Max(bounds.SizeX, bounds.SizeY), bounds.SizeZ) <= 0)
+        {
+            return Transform3D.Identity;
+        }
+
+        var center = new Point3D(
+            bounds.X + bounds.SizeX / 2,
+            bounds.Y + bounds.SizeY / 2,
+            bounds.Z + bounds.SizeZ / 2);
+        var largestAxis = Math.Max(Math.Max(bounds.SizeX, bounds.SizeY), bounds.SizeZ);
+        var scale = 4.2 / largestAxis;
+
+        var transform = new Transform3DGroup();
+        transform.Children.Add(new TranslateTransform3D(-center.X, -center.Y, -center.Z));
+        transform.Children.Add(new ScaleTransform3D(scale, scale, scale));
+        transform.Children.Add(new TranslateTransform3D(0, 1.35, 0));
+        return transform;
+    }
+
+    private MaterialLoadResult TryCreateTpacMaterial(
+        AssetPackage package,
+        Metamesh? metamesh,
+        Mesh mesh,
+        string fallbackName)
+    {
+        var materialGuidCount = GetMaterialGuids(metamesh, mesh).Count(guid => guid != Guid.Empty);
+        var resolvedMaterialCount = 0;
+        var textureRefCount = 0;
+        var resolvedTextureCount = 0;
+        var decodeFailureCount = 0;
+
+        try
+        {
+            var materials = package.Items
+                .OfType<TpacTool.Lib.Material>()
+                .GroupBy(item => item.Guid)
+                .ToDictionary(group => group.Key, group => group.First());
+            var textures = package.Items
+                .OfType<Texture>()
+                .GroupBy(item => item.Guid)
+                .ToDictionary(group => group.Key, group => group.First());
+
+            foreach (var material in GetExternalMaterialCandidates(materials, metamesh, mesh))
+            {
+                resolvedMaterialCount++;
+                textureRefCount += material.Textures.Count;
+
+                foreach (var texture in GetTextureCandidates(material, textures, ResolveTexture))
+                {
+                    resolvedTextureCount++;
+                    ImageBrush? brush;
+                    try
+                    {
+                        brush = CreateTextureBrush(texture);
+                    }
+                    catch
+                    {
+                        decodeFailureCount++;
+                        continue;
+                    }
+
+                    if (brush == null)
+                    {
+                        continue;
+                    }
+
+                    return new MaterialLoadResult(new DiffuseMaterial(brush),
+                        $"texture: applied {texture.Name} ({texture.Width}x{texture.Height}, {texture.Format}, score {TextureScore(texture)})");
+                }
+            }
+
+            foreach (var material in GetDependencyMaterialCandidates(package, metamesh, mesh))
+            {
+                resolvedMaterialCount++;
+                textureRefCount += material.Textures.Count;
+
+                foreach (var texture in GetTextureCandidates(material, textures, ResolveTexture))
+                {
+                    resolvedTextureCount++;
+                    ImageBrush? brush;
+                    try
+                    {
+                        brush = CreateTextureBrush(texture);
+                    }
+                    catch
+                    {
+                        decodeFailureCount++;
+                        continue;
+                    }
+
+                    if (brush == null)
+                    {
+                        continue;
+                    }
+
+                    return new MaterialLoadResult(new DiffuseMaterial(brush),
+                        $"texture: applied dependency {texture.Name} ({texture.Width}x{texture.Height}, {texture.Format}, score {TextureScore(texture)})");
+                }
+            }
+
+            foreach (var texture in GetDependencyTextureCandidates(package, metamesh, mesh))
+            {
+                resolvedTextureCount++;
+                ImageBrush? brush;
+                try
+                {
+                    brush = CreateTextureBrush(texture);
+                }
+                catch
+                {
+                    decodeFailureCount++;
+                    continue;
+                }
+
+                if (brush == null)
+                {
+                    continue;
+                }
+
+                return new MaterialLoadResult(new DiffuseMaterial(brush),
+                    $"texture: applied dependency texture {texture.Name} ({texture.Width}x{texture.Height}, {texture.Format}, score {TextureScore(texture)})");
+            }
+        }
+        catch (Exception ex)
+        {
+            return new MaterialLoadResult(null, $"texture: resolver failed ({ex.Message})");
+        }
+
+        return new MaterialLoadResult(null,
+            $"texture: none applied; material refs {materialGuidCount}, resolved materials {resolvedMaterialCount}, texture refs {textureRefCount}, usable textures {resolvedTextureCount}, decode failures {decodeFailureCount}");
+    }
+
+    private IEnumerable<TpacTool.Lib.Material> GetExternalMaterialCandidates(
+        IReadOnlyDictionary<Guid, TpacTool.Lib.Material> localMaterials,
+        Metamesh? metamesh,
+        Mesh mesh)
+    {
+        var seen = new HashSet<Guid>();
+        foreach (var guid in GetMaterialGuids(metamesh, mesh))
+        {
+            if (guid == Guid.Empty || !seen.Add(guid))
+            {
+                continue;
+            }
+
+            var material = ResolveMaterial(localMaterials, guid);
+            if (material != null)
+            {
+                yield return material;
+            }
+        }
+    }
+
+    private static IEnumerable<TpacTool.Lib.Material> GetDependencyMaterialCandidates(
+        AssetPackage package,
+        Metamesh? metamesh,
+        Mesh mesh)
+    {
+        var targetGuids = GetDependencyTargetGuids(metamesh, mesh);
+        return package.Items
+            .OfType<TpacTool.Lib.Material>()
+            .Where(material => DependsOnAny(material, targetGuids))
+            .OrderByDescending(material => DependencyScore(material, targetGuids));
+    }
+
+    private static IEnumerable<Texture> GetDependencyTextureCandidates(
+        AssetPackage package,
+        Metamesh? metamesh,
+        Mesh mesh)
+    {
+        var targetGuids = GetDependencyTargetGuids(metamesh, mesh);
+        return package.Items
+            .OfType<Texture>()
+            .Where(texture => IsUsableTexture(texture) && DependsOnAny(texture, targetGuids))
+            .OrderByDescending(texture => TextureScore(texture));
+    }
+
+    private static HashSet<Guid> GetDependencyTargetGuids(Metamesh? metamesh, Mesh mesh)
+    {
+        var guids = new HashSet<Guid> { mesh.Guid };
+        if (metamesh != null)
+        {
+            guids.Add(metamesh.Guid);
+        }
+
+        return guids;
+    }
+
+    private static bool DependsOnAny(AssetItem asset, IReadOnlySet<Guid> targetGuids)
+    {
+        return asset.UnknownDependences.Any(dep =>
+            targetGuids.Contains(dep.UnknownGuid1) ||
+            targetGuids.Contains(dep.UnknownGuid2) ||
+            targetGuids.Contains(dep.UnknownGuid3));
+    }
+
+    private static int DependencyScore(AssetItem asset, IReadOnlySet<Guid> targetGuids)
+    {
+        var score = 0;
+        foreach (var dep in asset.UnknownDependences)
+        {
+            if (targetGuids.Contains(dep.UnknownGuid1))
+            {
+                score += 10;
+            }
+
+            if (targetGuids.Contains(dep.UnknownGuid2))
+            {
+                score += 20;
+            }
+
+            if (targetGuids.Contains(dep.UnknownGuid3))
+            {
+                score += 5;
+            }
+        }
+
+        return score;
+    }
+
+    private static IEnumerable<TpacTool.Lib.Material> GetMaterialCandidates(
+        IReadOnlyDictionary<Guid, TpacTool.Lib.Material> materials,
+        Metamesh? metamesh,
+        Mesh mesh)
+    {
+        var seen = new HashSet<Guid>();
+        foreach (var guid in GetMaterialGuids(metamesh, mesh))
+        {
+            if (guid == Guid.Empty || !seen.Add(guid))
+            {
+                continue;
+            }
+
+            if (materials.TryGetValue(guid, out var material))
+            {
+                yield return material;
+            }
+        }
+    }
+
+    private static IEnumerable<Guid> GetMaterialGuids(Metamesh? metamesh, Mesh mesh)
+    {
+        yield return mesh.Material.Guid;
+        yield return mesh.SecondMaterial.Guid;
+        yield return metamesh?.Material ?? Guid.Empty;
+    }
+
+    private TpacTool.Lib.Material? ResolveMaterial(
+        IReadOnlyDictionary<Guid, TpacTool.Lib.Material> localMaterials,
+        Guid guid)
+    {
+        if (guid == Guid.Empty)
+        {
+            return null;
+        }
+
+        if (localMaterials.TryGetValue(guid, out var localMaterial))
+        {
+            return localMaterial;
+        }
+
+        if (!_materialPackagePaths.TryGetValue(guid, out var packagePath))
+        {
+            return null;
+        }
+
+        var package = LoadLookupPackage(packagePath);
+        return package?.Items.OfType<TpacTool.Lib.Material>().FirstOrDefault(item => item.Guid == guid);
+    }
+
+    private Texture? ResolveTexture(
+        IReadOnlyDictionary<Guid, Texture> localTextures,
+        Guid guid)
+    {
+        if (guid == Guid.Empty)
+        {
+            return null;
+        }
+
+        if (localTextures.TryGetValue(guid, out var localTexture))
+        {
+            return localTexture;
+        }
+
+        if (!_texturePackagePaths.TryGetValue(guid, out var packagePath))
+        {
+            return null;
+        }
+
+        var package = LoadLookupPackage(packagePath);
+        return package?.Items.OfType<Texture>().FirstOrDefault(item => item.Guid == guid);
+    }
+
+    private AssetPackage? LoadLookupPackage(string packagePath)
+    {
+        if (_lookupPackageCache.TryGetValue(packagePath, out var package))
+        {
+            return package;
+        }
+
+        if (!File.Exists(packagePath))
+        {
+            return null;
+        }
+
+        package = new AssetPackage(packagePath, loadHeaderNow: true, loadDataNow: false);
+        _lookupPackageCache[packagePath] = package;
+        return package;
+    }
+
+    private static IEnumerable<Texture> GetTextureCandidates(
+        TpacTool.Lib.Material material,
+        IReadOnlyDictionary<Guid, Texture> textures,
+        Func<IReadOnlyDictionary<Guid, Texture>, Guid, Texture?> resolveTexture)
+    {
+        return material.Textures
+            .Select(pair => (Slot: pair.Key, Texture: resolveTexture(textures, pair.Value.Guid)))
+            .Where(item => item.Texture != null && IsUsableTexture(item.Texture))
+            .OrderByDescending(item => TextureScore(item.Slot, item.Texture!))
+            .Select(item => item.Texture!);
+    }
+
+    private static bool IsUsableTexture(Texture texture)
+    {
+        if (!texture.Format.IsSupported() || !texture.Format.IsVisual())
+        {
+            return false;
+        }
+
+        if (texture.TexturePixels == null)
+        {
+            return false;
+        }
+
+        return true;
+    }
+
+    private static int TextureScore(Texture texture)
+    {
+        return TextureScore(0, texture);
+    }
+
+    private static int TextureScore(int slot, Texture texture)
+    {
+        var score = slot == 0 ? 100 : Math.Max(0, 60 - slot);
+        var names = new[] { texture.Name, texture.Source };
+        if (names.Any(IsDiffuseTextureName))
+        {
+            score += 100;
+        }
+
+        if (texture.Format == TextureFormat.BC7 ||
+            texture.Format == TextureFormat.DXT1 ||
+            texture.Format == TextureFormat.DXT3 ||
+            texture.Format == TextureFormat.DXT5 ||
+            texture.Format == TextureFormat.R8G8B8A8_UNORM ||
+            texture.Format == TextureFormat.B8G8R8A8_UNORM)
+        {
+            score += 10;
+        }
+
+        if (names.Any(IsNonDiffuseTextureName) ||
+            texture.Flags.Concat(texture.SystemFlags ?? [])
+                .Any(flag =>
+                    flag.Contains("bump", StringComparison.OrdinalIgnoreCase) ||
+                    flag.Contains("normal", StringComparison.OrdinalIgnoreCase) ||
+                    flag.Contains("specular", StringComparison.OrdinalIgnoreCase)))
+        {
+            score -= 120;
+        }
+
+        return score;
+    }
+
+    private static bool IsDiffuseTextureName(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return false;
+        }
+
+        var name = Path.GetFileNameWithoutExtension(value).ToLowerInvariant();
+        return name.EndsWith("_d", StringComparison.Ordinal) ||
+               name.EndsWith("_diffuse", StringComparison.Ordinal) ||
+               name.EndsWith("_albedo", StringComparison.Ordinal) ||
+               name.EndsWith("_basecolor", StringComparison.Ordinal) ||
+               name.EndsWith("_base_color", StringComparison.Ordinal);
+    }
+
+    private static bool IsNonDiffuseTextureName(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return false;
+        }
+
+        var name = Path.GetFileNameWithoutExtension(value).ToLowerInvariant();
+        return name.EndsWith("_n", StringComparison.Ordinal) ||
+               name.EndsWith("_normal", StringComparison.Ordinal) ||
+               name.EndsWith("_bump", StringComparison.Ordinal) ||
+               name.EndsWith("_s", StringComparison.Ordinal) ||
+               name.EndsWith("_spec", StringComparison.Ordinal) ||
+               name.EndsWith("_specular", StringComparison.Ordinal) ||
+               name.EndsWith("_m", StringComparison.Ordinal) ||
+               name.EndsWith("_metallic", StringComparison.Ordinal) ||
+               name.EndsWith("_ao", StringComparison.Ordinal) ||
+               name.EndsWith("_occlusion", StringComparison.Ordinal);
+    }
+
+    private static ImageBrush? CreateTextureBrush(Texture texture)
+    {
+        if (texture.TexturePixels?.Data.PrimaryRawImage is not { Length: > 0 } pixels)
+        {
+            return null;
+        }
+
+        var width = checked((int)texture.Width);
+        var height = checked((int)texture.Height);
+#pragma warning disable CS0612
+        var decoded = TextureUtil.DecodeTextureData(pixels, width, height, texture.Format);
+#pragma warning restore CS0612
+        var buffer = new byte[width * height * 4];
+
+        for (var i = 0; i < decoded.Length; i++)
+        {
+            var offset = i * 4;
+            buffer[offset] = ToByte(decoded[i].B);
+            buffer[offset + 1] = ToByte(decoded[i].G);
+            buffer[offset + 2] = ToByte(decoded[i].R);
+            buffer[offset + 3] = ToByte(decoded[i].A);
+        }
+
+        var bitmap = BitmapSource.Create(
+            width,
+            height,
+            96,
+            96,
+            PixelFormats.Bgra32,
+            null,
+            buffer,
+            width * 4);
+        bitmap.Freeze();
+
+        var brush = new ImageBrush(bitmap)
+        {
+            TileMode = TileMode.Tile,
+            Viewport = new Rect(0, 0, 1, 1),
+            ViewportUnits = BrushMappingMode.RelativeToBoundingBox,
+            Stretch = Stretch.Fill
+        };
+        brush.Freeze();
+        return brush;
+    }
+
+    private static byte ToByte(float value)
+    {
+        var byteValue = value <= 1f ? value * 255f : value;
+        return (byte)Math.Clamp((int)Math.Round(byteValue), 0, 255);
     }
 
     private static bool IsValidIndex(int index, int length)
@@ -1554,6 +2628,24 @@ public partial class MainWindow : Window
         };
     }
 
+    private static GeometryModel3D CreateModel(
+        MeshGeometry3D mesh,
+        System.Windows.Media.Media3D.Material? material,
+        Color fallbackColor)
+    {
+        if (material == null)
+        {
+            return CreateModel(mesh, fallbackColor);
+        }
+
+        return new GeometryModel3D
+        {
+            Geometry = mesh,
+            Material = material,
+            BackMaterial = material
+        };
+    }
+
     private static void AddQuad(MeshGeometry3D mesh, Point3D a, Point3D b, Point3D c, Point3D d)
     {
         var start = mesh.Positions.Count;
@@ -1675,20 +2767,28 @@ public sealed class MeshAssetNode
     public ObservableCollection<MeshAssetNode> Assets { get; } = [];
 }
 
+public sealed record MaterialLoadResult(
+    System.Windows.Media.Media3D.Material? Material,
+    string Status);
+
 public sealed class CraftingPieceNode
 {
     public static readonly CraftingPieceNode Empty = new() { Id = "(None)" };
 
-    public string Id { get; init; } = string.Empty;
-    public string PieceType { get; init; } = string.Empty;
-    public string MeshName { get; init; } = string.Empty;
-    public float Length { get; init; }
-    public float DistanceToNextPiece { get; init; }
-    public float DistanceToPreviousPiece { get; init; }
-    public float PieceOffset { get; init; }
-    public float PreviousPieceOffset { get; init; }
-    public float NextPieceOffset { get; init; }
-    public int Scale { get; init; } = 100;
+    public string Id { get; set; } = string.Empty;
+    public string PieceType { get; set; } = string.Empty;
+    public string MeshName { get; set; } = string.Empty;
+    public float Length { get; set; }
+    public float DistanceToNextPiece { get; set; }
+    public float DistanceToPreviousPiece { get; set; }
+    public float PieceOffset { get; set; }
+    public float PreviousPieceOffset { get; set; }
+    public float NextPieceOffset { get; set; }
+    public int Scale { get; set; } = 100;
+    public float OriginalPieceOffset { get; set; }
+    public float OriginalPreviousPieceOffset { get; set; }
+    public float OriginalNextPieceOffset { get; set; }
+    public int OriginalScale { get; set; } = 100;
     public float ScaleFactor => Scale * 0.01f;
     public float ScaledLength => Length * ScaleFactor;
     public float ScaledDistanceToNextPiece => DistanceToNextPiece * ScaleFactor;
@@ -1696,8 +2796,29 @@ public sealed class CraftingPieceNode
     public float ScaledPieceOffset => PieceOffset * ScaleFactor;
     public float ScaledPreviousPieceOffset => PreviousPieceOffset * ScaleFactor;
     public float ScaledNextPieceOffset => NextPieceOffset * ScaleFactor;
+    public float VisualLength => Math.Max(Length, DistanceToNextPiece + DistanceToPreviousPiece);
+    public bool IsDirty =>
+        PieceOffset != OriginalPieceOffset ||
+        PreviousPieceOffset != OriginalPreviousPieceOffset ||
+        NextPieceOffset != OriginalNextPieceOffset ||
+        Scale != OriginalScale;
 
     public override string ToString() => Id;
+}
+
+public enum MeshRenderMode
+{
+    AssetPreview,
+    CraftingPiece,
+    Raw
+}
+
+public sealed class AppSettings
+{
+    public bool SaveSettings { get; init; }
+    public string? AssetPackagesPath { get; init; }
+    public string? CraftingPiecesPath { get; init; }
+    public string? CraftingTemplatesPath { get; init; }
 }
 
 public sealed class TroopNode
