@@ -18,9 +18,13 @@ internal sealed class TroopPoses
     private static readonly Matrix4x4 FromViewport = Matrix4x4.Transpose(ToViewport);
 
     internal int BoneCount => _rest.Length;
+    internal ExportBone[] GetExportBones() => _rest.Select((rest, i) => new ExportBone(
+        _skeleton.Bones[i].Name, _parents[i], FromViewport * rest * ToViewport,
+        FromViewport * _inverseBind[i] * ToViewport)).ToArray();
     internal IReadOnlyList<PoseAnimation> Animations { get; }
     private readonly Dictionary<string, PoseAnimation> _holdingPoses = new(StringComparer.Ordinal);
     private readonly Dictionary<string, XElement> _holsters = new(StringComparer.Ordinal);
+    internal string HolsterSourcePath { get; }
     private readonly Dictionary<string, Matrix4x4> _holsterRoots = new(StringComparer.Ordinal);
 
     internal TroopPoses(string nativeAssetFolder)
@@ -72,6 +76,7 @@ internal sealed class TroopPoses
             }
         }
         var holsterPath = Path.Combine(nativeAssetFolder, "..", "ModuleData", "item_holsters.xml");
+        HolsterSourcePath = Path.GetFullPath(holsterPath);
         if (File.Exists(holsterPath))
             foreach (var holster in XDocument.Load(holsterPath).Descendants("item_holster"))
                 if ((string?)holster.Attribute("id") is { } id) _holsters[id] = holster;
@@ -120,7 +125,17 @@ internal sealed class TroopPoses
         return _holdingPoses.GetValueOrDefault(name);
     }
 
-    internal (int Bone, Matrix4x4 Frame, string Group) GetHolsterAttachment(string[] candidates, Vector3 shift, ISet<string> occupied)
+    internal XElement GetHolsterDefinition(string name) => _holsters.TryGetValue(name, out var definition)
+        ? new XElement(definition) : throw new InvalidDataException($"Holster '{name}' is unavailable.");
+
+    internal void UpdateHolsterDefinitions(IEnumerable<XElement> definitions)
+    {
+        foreach (var definition in definitions)
+            _holsters[(string)definition.Attribute("id")!] = new XElement(definition);
+    }
+
+    internal (int Bone, Matrix4x4 Frame, string Group) GetHolsterAttachment(string[] candidates, Vector3 shift, ISet<string> occupied,
+        Vector3 rotationAdjustment = default)
     {
         foreach (var name in candidates)
         {
@@ -134,7 +149,9 @@ internal sealed class TroopPoses
             var skeletonName = (string?)holster.Attribute("holster_skeleton");
             if (skeletonName == null || !_holsterRoots.TryGetValue(skeletonName, out var holsterRoot))
                 throw new InvalidDataException($"Authored holster skeleton '{skeletonName}' is missing.");
-            frame = holsterRoot * Matrix4x4.CreateTranslation(shift) * frame * _bind[bone];
+            var adjustment = rotationAdjustment * (MathF.PI / 180);
+            var rotation = Matrix4x4.CreateRotationX(adjustment.X) * Matrix4x4.CreateRotationY(adjustment.Y) * Matrix4x4.CreateRotationZ(adjustment.Z);
+            frame = holsterRoot * Matrix4x4.CreateTranslation(shift) * rotation * frame * _bind[bone];
             return (bone, FromViewport * frame * ToViewport, group);
 
             (string Bone, Matrix4x4 Frame) Resolve(string id)

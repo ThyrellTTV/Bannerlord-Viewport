@@ -19,7 +19,7 @@ public partial class MainWindow
 
     private void RenderSizePreset_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
-        if (IsLoaded) ApplyRenderSizePreset();
+        if (IsLoaded && !_isUpdatingRenderSize) ApplyRenderSizePreset();
     }
 
     private void ApplyRenderSizePreset()
@@ -41,6 +41,7 @@ public partial class MainWindow
             RenderHeightBox.Text = size.Item2.ToString(CultureInfo.InvariantCulture);
         }
         finally { _isUpdatingRenderSize = false; }
+        SaveSettingsIfEnabled();
     }
 
     private void RenderDimension_TextChanged(object sender, TextChangedEventArgs e)
@@ -48,6 +49,12 @@ public partial class MainWindow
         if (!IsLoaded || _isUpdatingRenderSize) return;
         RenderSizePreset.SelectedIndex = 4;
         RenderExportStatusText.Text = "";
+        SaveSettingsIfEnabled();
+    }
+
+    private void RenderSetting_Changed(object sender, RoutedEventArgs e)
+    {
+        if (IsLoaded && !_isUpdatingRenderSize) SaveSettingsIfEnabled();
     }
 
     private void ExportRender_Click(object sender, RoutedEventArgs e)
@@ -68,12 +75,15 @@ public partial class MainWindow
             Title = "Export render", Filter = "PNG image (*.png)|*.png", DefaultExt = ".png",
             AddExtension = true, FileName = string.IsNullOrWhiteSpace(name) ? "render.png" : name + ".png"
         };
+        if (Directory.Exists(_renderOutputDirectory)) dialog.InitialDirectory = _renderOutputDirectory;
         // Freeze the selected frame while the save dialog runs its nested UI message loop.
         var resumePlayback = _posePlaybackTimer.IsEnabled;
         StopPosePlayback();
         try
         {
             if (dialog.ShowDialog(this) != true) return;
+            _renderOutputDirectory = Path.GetDirectoryName(dialog.FileName) ?? "";
+            SaveSettingsIfEnabled();
             SaveRenderButton.IsEnabled = false;
             SaveRenderPng(dialog.FileName, width, height, RenderBackgroundCombo.SelectedIndex == 0,
                 RenderGridCheckBox.IsChecked == true);

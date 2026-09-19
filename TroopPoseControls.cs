@@ -212,6 +212,7 @@ public partial class MainWindow
         _heldEquipmentModels.Clear();
         _renderer.SetPose(null, null);
         RefreshTroopPoseAvailability();
+        RefreshItemPositionEditor();
     }
 
     private void ApplyTroopPose()

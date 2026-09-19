@@ -1,0 +1,111 @@
+<Window x:Class="LOTRAOM_Viewport.TurntableExportWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Turntable Export" Width="520" Height="730" MinWidth="480" MinHeight="520"
+        Background="#0C1016" Foreground="#ECE8D8" WindowStartupLocation="CenterOwner"
+        ShowInTaskbar="False" Closing="Window_Closing">
+    <Grid Margin="20">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" /><RowDefinition Height="*" />
+            <RowDefinition Height="Auto" /><RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+        <TextBlock x:Name="HeaderText" Text="TURNTABLE EXPORT" Foreground="{StaticResource AccentBrush}" FontSize="14" FontWeight="Bold" Margin="0,0,0,14" />
+        <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
+            <StackPanel x:Name="SettingsPanel" Margin="0,0,12,0">
+                <StackPanel x:Name="BatchScopePanel" Visibility="Collapsed" Margin="0,0,0,12">
+                    <TextBlock Text="Meshes" Foreground="{StaticResource MutedBrush}" Margin="0,0,0,4" />
+                    <ComboBox x:Name="ScopeCombo" IsEditable="False" />
+                    <CheckBox x:Name="OrganiseCheckBox" Content="Module / package folders" Foreground="#D8D4C1" Margin="0,10,0,0" />
+                </StackPanel>
+                <TextBlock Text="Format" Foreground="{StaticResource MutedBrush}" Margin="0,0,0,4" />
+                <ComboBox x:Name="FormatCombo" IsEditable="False" SelectionChanged="Format_SelectionChanged">
+                    <ComboBoxItem Content="PNG sequence" /><ComboBoxItem Content="MP4 video" />
+                </ComboBox>
+                <TextBlock Text="Output folder" Foreground="{StaticResource MutedBrush}" Margin="0,12,0,4" />
+                <Grid>
+                    <Grid.ColumnDefinitions><ColumnDefinition /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                    <TextBox x:Name="OutputFolderBox" />
+                    <Button Grid.Column="1" Width="36" Margin="8,0,0,0" Padding="0" ToolTip="Choose output folder" Click="BrowseOutput_Click">
+                        <TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xE8B7;" />
+                    </Button>
+                </Grid>
+                <TextBlock Text="Output name" Foreground="{StaticResource MutedBrush}" Margin="0,12,0,4" />
+                <TextBox x:Name="NameBox" MaxLength="100" />
+                <StackPanel x:Name="EncoderPanel" Margin="0,12,0,0">
+                    <TextBlock Text="FFmpeg executable" Foreground="{StaticResource MutedBrush}" Margin="0,0,0,4" />
+                    <Grid>
+                        <Grid.ColumnDefinitions><ColumnDefinition /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                        <TextBox x:Name="FfmpegBox" />
+                        <Button Grid.Column="1" Width="36" Margin="8,0,0,0" Padding="0" ToolTip="Choose FFmpeg executable" Click="BrowseFfmpeg_Click">
+                            <TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xE8B7;" />
+                        </Button>
+                    </Grid>
+                </StackPanel>
+                <Grid Margin="0,12,0,0">
+                    <Grid.ColumnDefinitions><ColumnDefinition /><ColumnDefinition Width="12" /><ColumnDefinition /></Grid.ColumnDefinitions>
+                    <StackPanel>
+                        <TextBlock Text="Width (px)" Foreground="{StaticResource MutedBrush}" Margin="0,0,0,4" />
+                        <TextBox x:Name="WidthBox" MaxLength="4" />
+                    </StackPanel>
+                    <StackPanel Grid.Column="2">
+                        <TextBlock Text="Height (px)" Foreground="{StaticResource MutedBrush}" Margin="0,0,0,4" />
+                        <TextBox x:Name="HeightBox" MaxLength="4" />
+                    </StackPanel>
+                </Grid>
+                <Grid Margin="0,12,0,0">
+                    <Grid.ColumnDefinitions><ColumnDefinition /><ColumnDefinition Width="12" /><ColumnDefinition /></Grid.ColumnDefinitions>
+                    <StackPanel>
+                        <TextBlock Text="Duration (seconds)" Foreground="{StaticResource MutedBrush}" Margin="0,0,0,4" />
+                        <TextBox x:Name="SecondsBox" MaxLength="2" />
+                    </StackPanel>
+                    <StackPanel Grid.Column="2">
+                        <TextBlock Text="Frames per second" Foreground="{StaticResource MutedBrush}" Margin="0,0,0,4" />
+                        <TextBox x:Name="FpsBox" MaxLength="2" />
+                    </StackPanel>
+                </Grid>
+                <TextBlock Text="Background" Foreground="{StaticResource MutedBrush}" Margin="0,12,0,4" />
+                <ComboBox x:Name="BackgroundCombo" IsEditable="False">
+                    <ComboBoxItem Content="Transparent" /><ComboBoxItem Content="Studio" />
+                </ComboBox>
+                <CheckBox x:Name="GridCheckBox" Content="Grid" Foreground="#D8D4C1" Margin="0,10,0,0" />
+                <TextBlock Text="CAMERA" Foreground="{StaticResource AccentBrush}" FontSize="11" FontWeight="Bold" Margin="0,18,0,8" />
+                <TextBlock Text="Start angle (degrees)" Foreground="{StaticResource MutedBrush}" Margin="0,0,0,4" />
+                <TextBox x:Name="StartAngleBox" MaxLength="8" Margin="0,0,0,12"
+                         ToolTip="0: +Z view; 90: +X; 180: -Z (front for native armour); 270: -X" />
+                <Grid>
+                    <Grid.ColumnDefinitions><ColumnDefinition /><ColumnDefinition Width="12" /><ColumnDefinition /></Grid.ColumnDefinitions>
+                    <StackPanel>
+                        <TextBlock Text="Elevation (degrees)" Foreground="{StaticResource MutedBrush}" Margin="0,0,0,4" />
+                        <TextBox x:Name="ElevationBox" MaxLength="8" />
+                    </StackPanel>
+                    <StackPanel Grid.Column="2">
+                        <TextBlock Text="Direction" Foreground="{StaticResource MutedBrush}" Margin="0,0,0,4" />
+                        <ComboBox x:Name="DirectionCombo" IsEditable="False">
+                            <ComboBoxItem Content="Clockwise" /><ComboBoxItem Content="Counter-clockwise" />
+                        </ComboBox>
+                    </StackPanel>
+                </Grid>
+                <CheckBox x:Name="AutoFrameCheckBox" Content="Auto frame entire rotation" Foreground="#D8D4C1" Margin="0,10,0,8" />
+            </StackPanel>
+        </ScrollViewer>
+        <StackPanel Grid.Row="2" Margin="0,14,0,0">
+            <ProgressBar x:Name="ExportProgressBar" Height="6" Minimum="0" Maximum="1" />
+            <TextBlock x:Name="ProgressText" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Margin="0,8,0,0" />
+            <TextBlock x:Name="CurrentMeshText" TextTrimming="CharacterEllipsis" Margin="0,4,0,0" />
+            <TextBlock x:Name="StatusText" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Margin="0,6,0,0" MaxHeight="68" />
+        </StackPanel>
+        <Grid Grid.Row="3" Margin="0,14,0,0">
+            <Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition /><ColumnDefinition Width="Auto" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+            <Button x:Name="OpenOutputButton" Width="36" Padding="0" ToolTip="Open output folder" Click="OpenOutput_Click" IsEnabled="False">
+                <TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xE8B7;" />
+            </Button>
+            <Button x:Name="CancelButton" Grid.Column="2" Content="Close" MinWidth="80" Margin="0,0,8,0" Click="Cancel_Click" />
+            <Button x:Name="RunButton" Grid.Column="3" MinWidth="100" Click="StartExport_Click">
+                <StackPanel Orientation="Horizontal">
+                    <TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xE74E;" Margin="0,0,8,0" VerticalAlignment="Center" />
+                    <TextBlock Text="Export" />
+                </StackPanel>
+            </Button>
+        </Grid>
+    </Grid>
+</Window>

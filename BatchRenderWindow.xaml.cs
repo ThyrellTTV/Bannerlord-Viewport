@@ -17,6 +17,7 @@ public partial class BatchRenderWindow : Window
     private bool _updating = true;
     private bool _running;
     private string? _completedOutputDirectory;
+    internal event Action<BatchRenderOptions>? OptionsChanged;
 
     internal BatchRenderWindow(MainWindow owner, BatchRenderOptions options, int allCount, int filteredCount,
         Func<BatchRenderOptions, IProgress<BatchRenderProgress>, CancellationToken, Task<BatchRenderResult>> render)
@@ -55,6 +56,18 @@ public partial class BatchRenderWindow : Window
         _updating = false;
         RefreshSwatches();
         ProgressText.Text = "Ready";
+        SettingsPanel.AddHandler(TextBox.TextChangedEvent, new TextChangedEventHandler((_, _) => NotifyOptionsChanged()));
+        SettingsPanel.AddHandler(System.Windows.Controls.Primitives.Selector.SelectionChangedEvent,
+            new SelectionChangedEventHandler((_, _) => NotifyOptionsChanged()));
+        SettingsPanel.AddHandler(CheckBox.CheckedEvent, new RoutedEventHandler((_, _) => NotifyOptionsChanged()));
+        SettingsPanel.AddHandler(CheckBox.UncheckedEvent, new RoutedEventHandler((_, _) => NotifyOptionsChanged()));
+        SettingsPanel.AddHandler(System.Windows.Controls.Primitives.RangeBase.ValueChangedEvent,
+            new RoutedPropertyChangedEventHandler<double>((_, _) => NotifyOptionsChanged()));
+    }
+
+    private void NotifyOptionsChanged()
+    {
+        if (!_updating && !_running && TryGetOptions(out var options)) OptionsChanged?.Invoke(options!);
     }
 
     private void BrowseOutput_Click(object sender, RoutedEventArgs e)
@@ -153,6 +166,12 @@ public partial class BatchRenderWindow : Window
         options.Validate();
         if (_counts[options.Filtered ? 1 : 0] == 0) throw new ArgumentException("No meshes match the selected scope.");
         return options;
+    }
+
+    internal bool TryGetOptions(out BatchRenderOptions? options)
+    {
+        try { options = ReadOptions(); return true; }
+        catch (ArgumentException) { options = null; return false; }
     }
 
     private async void StartBatch_Click(object sender, RoutedEventArgs e)

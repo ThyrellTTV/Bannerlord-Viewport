@@ -112,13 +112,19 @@ public partial class MainWindow
         }
     }
 
-    private static string WeaponCategory(XElement item)
+    private string WeaponCategory(XElement item)
     {
         var weapon = item.Descendants().FirstOrDefault(element => element.Name.LocalName == "Weapon");
-        return GetAttributeValue(weapon ?? item, "weapon_class") ?? GetAttributeValue(item, "crafting_template") ?? "";
+        if (GetAttributeValue(weapon ?? item, "weapon_class") is { } category) return category;
+        var templateId = GetAttributeValue(item, "crafting_template") ?? "";
+        if (BundledCraftingBuildOrders.ContainsKey(templateId)) return templateId;
+        if (_equipmentTemplates.TryGetValue(templateId, out var template))
+            return template.Descendants("WeaponDescription").Select(description => GetAttributeValue(description, "id"))
+                .FirstOrDefault(id => id != null && BundledCraftingBuildOrders.ContainsKey(id)) ?? templateId;
+        return templateId;
     }
 
-    private static bool IsShield(XElement item) => GetAttributeValue(item, "type")?.Equals("Shield", StringComparison.OrdinalIgnoreCase) == true ||
+    private bool IsShield(XElement item) => GetAttributeValue(item, "type")?.Equals("Shield", StringComparison.OrdinalIgnoreCase) == true ||
         WeaponCategory(item) is "SmallShield" or "LargeShield";
 
     private static bool IsAmmunition(string category) => category is "Arrow" or "Bolt" or "Bullet" or "SlingStone";
@@ -174,7 +180,7 @@ public partial class MainWindow
         var offhand = item.Elements().Where(element => element.Name.LocalName == "Flags")
             .Any(flags => bool.TryParse(GetAttributeValue(flags, "ForceAttachOffHandPrimaryItemBone"), out var enabled) && enabled);
         var boneName = shield ? secondary ? "l_foretwist1" : "l_finger0" : offhand || category == "Bow" ? "l_finger0" : "r_finger0";
-        var attachment = _troopPoses.GetItemAttachment(boneName, CreateWeaponFrame(weapon));
+        var attachment = _troopPoses.GetItemAttachment(boneName, TunedWeaponFrame(reference[5..], weapon));
         var model = LoadEquipmentModel(reference);
         StudioRenderer.AttachToBone(model, attachment.Bone, attachment.Frame);
         _heldEquipmentModels.Add(model);
@@ -192,6 +198,8 @@ public partial class MainWindow
             throw new InvalidOperationException("This item has no authored holster positions.");
         var shift = ReadWeaponVector(GetAttributeValue(item, "holster_position_shift") ??
             GetAttributeValue(template ?? item, "default_item_holster_position_offset"));
+        var tuning = _itemPositions.GetValueOrDefault(reference[5..])?.Holstered;
+        if (tuning != null) shift = tuning.Position;
         if (item.Name.LocalName == "CraftedItem")
         {
             // WeaponDesign.CalculateHolsterShiftAmount scales the template + handle offset, then adds the guard length.
@@ -207,7 +215,8 @@ public partial class MainWindow
                     (GetAttributeValue(piece, "Type") ?? definition.PieceType) == "Guard")
                     shift.Z += definition.Length * (TryFloat(GetAttributeValue(piece, "scale_factor"), out var scale) ? scale * .01f : 1) * .01f;
         }
-        var attachment = _troopPoses!.GetHolsterAttachment(holsters.Split(':'), shift, _usedHolsterGroups);
+        var attachment = _troopPoses!.GetHolsterAttachment(holsters.Split(':'), shift, _usedHolsterGroups,
+            tuning?.Rotation ?? Vector3.Zero);
         Model3D model;
         if (item.Name.LocalName == "CraftedItem")
             model = CopyEquipmentPreview(reference, true, () => LoadCraftedEquipmentModel(item, sheathed: true));

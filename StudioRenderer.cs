@@ -140,6 +140,46 @@ internal sealed class StudioRenderer : IDisposable
         }
     }
 
+    internal Rect3D GetRenderBounds(Model3D model)
+    {
+        var bounds = Rect3D.Empty;
+        void Include(Model3D part, Matrix3D parent, bool posed)
+        {
+            posed |= ReferenceEquals(part, _posedModel);
+            var transform = part.Transform.Value;
+            transform.Append(parent);
+            if (part is Model3DGroup group)
+            {
+                foreach (var child in group.Children) Include(child, transform, posed);
+            }
+            else if (part is GeometryModel3D { Geometry: WpfMesh mesh })
+            {
+                var hasSkinning = Skinning.TryGetValue(mesh, out var bones);
+                var skinned = posed && _poseMatrices != null && hasSkinning &&
+                    bones!.All(id => id.Bone1 < _poseMatrices.Length && id.Bone2 < _poseMatrices.Length &&
+                        id.Bone3 < _poseMatrices.Length && id.Bone4 < _poseMatrices.Length);
+                for (var i = 0; i < mesh.Positions.Count; i++)
+                {
+                    var point = mesh.Positions[i];
+                    if (skinned)
+                    {
+                        var bone = bones![i];
+                        var position = new Vector3((float)point.X, (float)point.Y, (float)point.Z);
+                        var vertex = Vector3.Transform(position, _poseMatrices![bone.Bone1]) * bone.Weights.X +
+                            Vector3.Transform(position, _poseMatrices[bone.Bone2]) * bone.Weights.Y +
+                            Vector3.Transform(position, _poseMatrices[bone.Bone3]) * bone.Weights.Z +
+                            Vector3.Transform(position, _poseMatrices[bone.Bone4]) * bone.Weights.W;
+                        point = new Point3D(vertex.X, vertex.Y, vertex.Z);
+                    }
+                    bounds.Union(transform.Transform(point));
+                }
+            }
+        }
+        // Evaluate skinning once for export framing; WPF's ordinary bounds remain in the bind pose.
+        Include(model, Matrix3D.Identity, false);
+        return bounds;
+    }
+
     internal BitmapSource CaptureRender(int width, int height, bool transparent, bool includeGrid)
     {
         if (width < 64 || height < 64 || width > 8192 || height > 8192 || (long)width * height > 33554432)
@@ -241,6 +281,8 @@ internal sealed class StudioRenderer : IDisposable
         Skinning.Add(mesh, ids);
     }
 
+    internal static BoneIds[]? GetExportSkinning(WpfMesh mesh) => Skinning.TryGetValue(mesh, out var ids) ? ids : null;
+
     internal static bool CanPose(Model3D model, int boneCount)
     {
         if (model is Model3DGroup group) return group.Children.Any(child => CanPose(child, boneCount));
@@ -266,6 +308,7 @@ internal sealed class StudioRenderer : IDisposable
             {
                 // Bind-space geometry plus rigid weights uses the same GPU skinning as armour.
                 var mesh = source.CloneCurrentValue();
+                AssetExportMetadata.Copy(source, mesh);
                 mesh.Positions = new Point3DCollection(source.Positions.Select(transform.Transform));
                 mesh.Normals = new Vector3DCollection(source.Normals.Select(normal =>
                 {
@@ -495,8 +538,10 @@ internal sealed class StudioRenderer : IDisposable
             // Bannerlord R=metallic, G=gloss; Helix uses B=metallic, G=roughness.
             var metallic = Math.Clamp(pixels[i + 2] / 255.0 * specularCoefficient, 0, 1);
             var gloss = Math.Clamp(pixels[i + 1] / 255.0 * glossCoefficient, 0, 1);
+            var roughness = Math.Max(0.045, 1 - gloss);
             pixels[i] = (byte)Math.Round(metallic * 255);
-            pixels[i + 1] = (byte)Math.Round(Math.Max(0.045, 1 - gloss) * 255);
+            // Soften glossy highlights slightly while leaving fully matte surfaces unchanged.
+            pixels[i + 1] = (byte)Math.Round((roughness + 0.06 * (1 - roughness)) * 255);
             pixels[i + 2] = 255;
             pixels[i + 3] = 255;
         }

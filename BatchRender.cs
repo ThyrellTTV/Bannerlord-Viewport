@@ -1,6 +1,4 @@
 using System.IO;
-using System.Security.Cryptography;
-using System.Text;
 using System.Text.Json;
 using System.Windows;
 using System.Windows.Media;
@@ -27,7 +25,7 @@ public partial class MainWindow
 
     private void BatchRender_Click(object sender, RoutedEventArgs e)
     {
-        if (_batchRenderRunning) return;
+        if (_batchRenderRunning || _turntableRunning || _assetExportRunning) return;
         var all = GetBatchRenderAssets(false);
         if (all.Length == 0)
         {
@@ -44,9 +42,16 @@ public partial class MainWindow
             async (options, progress, cancellation) =>
             {
                 _batchRenderOptions = options;
+                SaveSettingsIfEnabled();
                 return await RunBatchRenderAsync(options.Filtered ? filtered : all, options, progress, cancellation);
             });
+        dialog.OptionsChanged += options => { _batchRenderOptions = options; SaveSettingsIfEnabled(); };
         dialog.ShowDialog();
+        if (dialog.TryGetOptions(out var edited))
+        {
+            _batchRenderOptions = edited;
+            SaveSettingsIfEnabled();
+        }
     }
 
     private async Task<BatchRenderResult> RunBatchRenderAsync(MeshAssetNode[] assets, BatchRenderOptions options,
@@ -56,7 +61,7 @@ public partial class MainWindow
         options.Validate();
         var outputDirectory = Path.GetFullPath(options.OutputDirectory);
         Directory.CreateDirectory(outputDirectory);
-        var reportPath = Path.Combine(outputDirectory, $"batch-report-{DateTime.UtcNow:yyyyMMdd-HHmmss-fff}-{Guid.NewGuid():N}.json");
+        var reportPath = Path.Combine(outputDirectory, "batch-report.json");
         var originalModels = _assetModel.Children.ToArray();
         var originalTransform = _assetModel.Transform;
         var originalPose = _renderer.PoseState;
@@ -66,6 +71,7 @@ public partial class MainWindow
         var oldOrbiting = _isOrbiting;
         var completed = 0; var saved = 0; var skipped = 0; var failed = 0;
         var entries = new List<object>();
+        var destinations = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         _batchRenderRunning = true;
         StopPosePlayback();
         _tableauColourTimer.Stop();
@@ -88,6 +94,11 @@ public partial class MainWindow
                     {
                         skipped++;
                         entries.Add(new { Mesh = asset.DisplayName, Package = asset.SourcePath, Status = "Skipped", Reason = "No renderable geometry stream." });
+                    }
+                    else if (!destinations.Add(destination))
+                    {
+                        skipped++;
+                        entries.Add(new { Mesh = asset.DisplayName, Package = asset.SourcePath, Output = destination, Status = "Skipped", Reason = "Another mesh in this batch uses the same output name." });
                     }
                     else if (!options.Overwrite && File.Exists(destination))
                     {
@@ -210,15 +221,14 @@ public partial class MainWindow
     private static string GetBatchRenderPath(string outputDirectory, MeshAssetNode asset, bool organise)
     {
         var source = Path.GetFullPath(asset.SourcePath);
-        var packageId = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(source.ToUpperInvariant())))[..12];
         if (organise)
         {
             var module = new FileInfo(source).Directory;
             while (module?.Parent != null && !module.Parent.Name.Equals("Modules", StringComparison.OrdinalIgnoreCase)) module = module.Parent;
             outputDirectory = Path.Combine(outputDirectory, SafeBatchName(module?.Parent == null ? "Assets" : module.Name),
-                SafeBatchName(asset.PackageName) + "_" + packageId);
+                SafeBatchName(asset.PackageName));
         }
-        return Path.Combine(outputDirectory, $"{SafeBatchName(asset.DisplayName)}_{packageId}_{asset.MetameshGuid:N}.png");
+        return Path.Combine(outputDirectory, SafeBatchName(asset.DisplayName) + ".png");
     }
 
     private static string SafeBatchName(string name)
@@ -234,7 +244,7 @@ public partial class MainWindow
     }
 }
 
-internal sealed record BatchRenderOptions
+public sealed record BatchRenderOptions
 {
     public string OutputDirectory { get; init; } = "";
     public bool Filtered { get; init; }

@@ -6,6 +6,11 @@
     <RootNamespace>LOTRAOM_Viewport</RootNamespace>
     <AssemblyName>Bannerlord Viewport</AssemblyName>
     <Product>Bannerlord Viewport</Product>
+    <Version>0.1.0-beta.1</Version>
+    <AssemblyVersion>0.1.0.0</AssemblyVersion>
+    <FileVersion>0.1.0.0</FileVersion>
+    <Description>A desktop viewer and editing toolkit for Bannerlord TPAC assets, troops, crafting pieces, renders, and source XML.</Description>
+    <RepositoryUrl>https://github.com/ThyrellTTV/Bannerlord-Viewport</RepositoryUrl>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <UseWPF>true</UseWPF>
@@ -16,9 +21,16 @@
     <Using Remove="System.Windows.Forms" />
     <Using Remove="System.Drawing" />
     <PackageReference Include="HelixToolkit.Wpf.SharpDX" Version="3.1.2" />
+    <PackageReference Include="AssimpNet" Version="5.0.0-beta1" />
     <Compile Remove="third_party\**\*.cs" />
+    <Compile Remove="tests\**\*.cs" />
+    <Compile Include="third_party\TpacTool\Export\*.cs" />
     <None Remove="third_party\**\*.cs" />
     <ProjectReference Include="third_party\TpacTool\TpacTool.Lib\TpacTool.Lib.csproj" />
+    <None Include="third_party\TpacTool\LICENSE" Link="Licenses\TpacTool.txt" CopyToOutputDirectory="PreserveNewest" />
+    <None Update="third_party\AssimpNet\LICENSE.txt" Link="Licenses\AssimpNet.txt" CopyToOutputDirectory="PreserveNewest" />
+    <None Update="README.md" CopyToPublishDirectory="PreserveNewest" />
+    <None Update="RELEASE_NOTES.md" CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>

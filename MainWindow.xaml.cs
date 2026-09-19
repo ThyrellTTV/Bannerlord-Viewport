@@ -6,6 +6,7 @@ using System.Text.RegularExpressions;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
+using System.Windows.Data;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
@@ -51,8 +52,14 @@ public partial class MainWindow : Window
     private readonly ObservableCollection<MeshAssetNode> _assetSearchResults = [];
     private readonly List<TpacPackageNode> _allPackages = [];
     private readonly ObservableCollection<TroopNode> _troops = [];
+    private string[] _troopSourceFiles = [];
+    private string _troopLoadSummary = "No troops loaded.";
+    private TroopNode? _activeTroop;
+    private string? _craftingSourceItemId;
     private readonly ObservableCollection<MeshAssetNode> _meshOptions = [];
     private readonly List<MeshAssetNode> _weaponOptions = [];
+    private readonly Dictionary<string, List<MeshAssetNode>> _armourOptions = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<ComboBox, string> _equipmentSearchText = [];
     private readonly Dictionary<string, XElement> _equipmentItems = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, CraftingPieceNode> _equipmentCraftingPieces = new(StringComparer.OrdinalIgnoreCase);
     private readonly ObservableCollection<CraftingPieceNode> _craftingPieces = [];
@@ -67,6 +74,7 @@ public partial class MainWindow : Window
     private readonly Dictionary<Guid, string> _texturePackagePaths = [];
     private readonly Dictionary<(string Path, Guid Asset), AssetPackage> _lookupPackageCache = [];
     private bool _isUpdatingComboFilters;
+    private System.Windows.Threading.DispatcherOperation? _pendingLoadoutPreview;
     private bool _isUpdatingCraftingCombos;
     private bool _isUpdatingCraftingEditor;
     private bool _isLoadingSavedSettings;
@@ -96,9 +104,10 @@ public partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
+        InitializeItemPositionEditor();
 
         AssetTree.ItemsSource = _packages;
-        TroopList.ItemsSource = _troops;
+        TroopList.ItemsSource = CollectionViewSource.GetDefaultView(_troops);
         BindEquipmentDropdowns();
         BindCraftingDropdowns();
         _renderer = new StudioRenderer(ModelViewport, _scene);
@@ -110,11 +119,23 @@ public partial class MainWindow : Window
         };
         _assetModel.Changed += (_, _) => UpdateTableauColourEditorVisibility();
         _isUpdatingTableauColours = false;
-        Closed += (_, _) => { _tableauColourTimer.Stop(); _renderer.Dispose(); };
+        Closed += (_, _) => { _pendingLoadoutPreview?.Abort(); _tableauColourTimer.Stop(); _renderer.Dispose(); };
         ResetScene();
         RenderEmptyPreview();
         LoadSavedSettingsIfAvailable();
+        Closing += (_, e) =>
+        {
+            if (_turntableRunning || _batchRenderRunning || _assetExportRunning) e.Cancel = true;
+            else SaveSettingsIfEnabled();
+        };
         RefreshTroopPoseLibrary();
+    }
+
+    private void InspectorSection_Expanded(object sender, RoutedEventArgs e)
+    {
+        if (!ReferenceEquals(e.OriginalSource, sender)) return;
+        foreach (var section in new[] { CraftingInspectorSection, ItemPositionInspectorSection, TableauInspectorSection, TroopXmlInspectorSection })
+            if (section != null && !ReferenceEquals(section, sender)) section.IsExpanded = false;
     }
 
     private void WorkspaceTabs_SelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -128,6 +149,7 @@ public partial class MainWindow : Window
         UpdateTableauColourEditorVisibility();
         RefreshTroopPoseAvailability();
         UpdateTroopXmlExport();
+        RefreshItemPositionEditor();
     }
 
     private void UpdateTableauColourEditorVisibility()
@@ -317,7 +339,7 @@ public partial class MainWindow : Window
 
         try
         {
-            var settings = JsonSerializer.Deserialize<AppSettings>(File.ReadAllText(SettingsFilePath));
+            var settings = JsonSerializer.Deserialize<AppSettings>(File.ReadAllText(SettingsFilePath), RenderSettingsJsonOptions);
             if (settings?.SaveSettings != true)
             {
                 SettingsStatusText.Text = "Settings saving is off.";
@@ -325,14 +347,8 @@ public partial class MainWindow : Window
             }
 
             _isLoadingSavedSettings = true;
-            try
-            {
-                SaveSettingsCheckBox.IsChecked = true;
-            }
-            finally
-            {
-                _isLoadingSavedSettings = false;
-            }
+            SaveSettingsCheckBox.IsChecked = true;
+            RestoreRenderSettings(settings);
 
             var loaded = new List<string>();
             if (!string.IsNullOrWhiteSpace(settings.AssetPackagesPath) &&
@@ -356,6 +372,13 @@ public partial class MainWindow : Window
                 loaded.Add("crafting templates");
             }
 
+            if (!string.IsNullOrWhiteSpace(settings.TroopsPath) &&
+                (File.Exists(settings.TroopsPath) || Directory.Exists(settings.TroopsPath)))
+            {
+                LoadTroopXml(settings.TroopsPath);
+                loaded.Add("troops");
+            }
+
             SettingsStatusText.Text = loaded.Count == 0
                 ? "Saved settings found, but paths are missing."
                 : $"Loaded saved {string.Join(", ", loaded)}.";
@@ -365,6 +388,7 @@ public partial class MainWindow : Window
             _isLoadingSavedSettings = false;
             SettingsStatusText.Text = $"Could not load settings: {ex.Message}";
         }
+        finally { _isLoadingSavedSettings = false; }
     }
 
     private void SaveSettingsIfEnabled()
@@ -380,17 +404,29 @@ public partial class MainWindow : Window
         try
         {
             Directory.CreateDirectory(SettingsDirectory);
+            var saveSettings = SaveSettingsCheckBox.IsChecked == true;
             var settings = new AppSettings
             {
-                SaveSettings = SaveSettingsCheckBox.IsChecked == true,
+                SaveSettings = saveSettings,
                 AssetPackagesPath = GetPersistablePath(AssetPathBox.Text),
                 CraftingPiecesPath = GetPersistablePath(CraftingPiecesPathBox.Text),
-                CraftingTemplatesPath = GetPersistablePath(CraftingTemplatesPathBox.Text)
+                CraftingTemplatesPath = GetPersistablePath(CraftingTemplatesPathBox.Text),
+                TroopsPath = saveSettings ? GetPersistablePath(TroopXmlPathBox.Text) : null,
+                Render = saveSettings ? ReadRenderSettings() : null,
+                BatchRender = saveSettings ? _batchRenderOptions : null,
+                Turntable = saveSettings ? _turntableOptions : null,
+                BatchTurntable = saveSettings ? _batchTurntableOptions : null,
+                AssetExport = saveSettings ? _assetExportOptions : null,
+                ItemPositions = saveSettings ? new Dictionary<string, ItemPositionTuning>(_itemPositions, StringComparer.OrdinalIgnoreCase) : null
             };
 
-            File.WriteAllText(
-                SettingsFilePath,
-                JsonSerializer.Serialize(settings, new JsonSerializerOptions { WriteIndented = true }));
+            var temporary = SettingsFilePath + "." + Guid.NewGuid().ToString("N") + ".tmp";
+            try
+            {
+                File.WriteAllText(temporary, JsonSerializer.Serialize(settings, RenderSettingsJsonOptions));
+                File.Move(temporary, SettingsFilePath, overwrite: true);
+            }
+            finally { if (File.Exists(temporary)) File.Delete(temporary); }
 
             SettingsStatusText.Text = settings.SaveSettings
                 ? $"Settings saved to {SettingsFilePath}"
@@ -466,6 +502,7 @@ public partial class MainWindow : Window
             TextSearch.SetTextPath(comboBox, nameof(MeshAssetNode.DisplayName));
             comboBox.Loaded += EquipmentCombo_Loaded;
             comboBox.DropDownOpened += EquipmentCombo_DropDownOpened;
+            comboBox.SelectionChanged += EquipmentCombo_SelectionChanged;
             comboBox.SelectionChanged += CustomLoadout_Changed;
             comboBox.AddHandler(TextBoxBase.TextChangedEvent, new TextChangedEventHandler(CustomLoadout_Changed));
         }
@@ -505,7 +542,16 @@ public partial class MainWindow : Window
         if (sender is ComboBox comboBox)
         {
             AttachEquipmentComboTextBox(comboBox);
-            FilterEquipmentCombo(comboBox, comboBox.Text);
+            FilterEquipmentCombo(comboBox, _equipmentSearchText.GetValueOrDefault(comboBox));
+        }
+    }
+
+    private void EquipmentCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (!_isUpdatingComboFilters && sender is ComboBox { SelectedItem: MeshAssetNode } comboBox)
+        {
+            _equipmentSearchText.Remove(comboBox);
+            ScheduleCustomLoadoutPreview();
         }
     }
 
@@ -518,7 +564,10 @@ public partial class MainWindow : Window
             return;
         }
 
+        if (comboBox.SelectedItem is MeshAssetNode selected && selected.DisplayName == textBox.Text) return;
+        _equipmentSearchText[comboBox] = textBox.Text;
         FilterEquipmentCombo(comboBox, textBox.Text);
+        if (string.IsNullOrWhiteSpace(textBox.Text) || IsKnownEquipmentPreviewValue(textBox.Text)) ScheduleCustomLoadoutPreview();
         if (comboBox.IsKeyboardFocusWithin)
         {
             comboBox.IsDropDownOpen = true;
@@ -536,6 +585,11 @@ public partial class MainWindow : Window
 
         _equipmentTextBoxes[textBox] = comboBox;
         textBox.TextChanged += EquipmentCombo_TextChanged;
+        textBox.LostKeyboardFocus += (_, _) => ScheduleCustomLoadoutPreview();
+        textBox.KeyDown += (_, e) =>
+        {
+            if (e.Key == Key.Enter) { ScheduleCustomLoadoutPreview(); comboBox.IsDropDownOpen = false; e.Handled = true; }
+        };
     }
 
     private void FilterEquipmentCombo(ComboBox comboBox, string? searchText)
@@ -546,22 +600,39 @@ public partial class MainWindow : Window
         }
 
         var needle = searchText?.Trim() ?? string.Empty;
-        IEnumerable<MeshAssetNode> options = ReferenceEquals(comboBox, Item0Combo) || ReferenceEquals(comboBox, Item1Combo)
-            ? _weaponOptions : _meshOptions;
+        var itemType = comboBox.Name switch
+        {
+            "HelmetCombo" => "HeadArmor", "CapeCombo" => "Cape", "BodyCombo" => "BodyArmor",
+            "ArmCombo" => "HandArmor", "LegCombo" => "LegArmor", _ => ""
+        };
+        IEnumerable<MeshAssetNode> options = itemType.Length == 0 ? _weaponOptions
+            : (_armourOptions.GetValueOrDefault(itemType) ?? []).Concat(_meshOptions);
         var matches = string.IsNullOrWhiteSpace(needle)
             ? options.Take(250)
             : options
                 .Where(option => option.DisplayName.Contains(needle, StringComparison.OrdinalIgnoreCase) ||
                     option.Kind == "Item" && option.Status.Contains(needle, StringComparison.OrdinalIgnoreCase))
                 .Take(250);
+        var results = matches.ToArray();
+        var text = comboBox.Text;
+        var textBox = comboBox.Template.FindName("PART_EditableTextBox", comboBox) as TextBox;
+        var selectionStart = textBox?.SelectionStart ?? 0;
+        var selectionLength = textBox?.SelectionLength ?? 0;
 
         _isUpdatingComboFilters = true;
-        filteredOptions.Clear();
-        foreach (var match in matches)
+        try
         {
-            filteredOptions.Add(match);
+            filteredOptions.Clear();
+            foreach (var match in results) filteredOptions.Add(match);
+            comboBox.SelectedItem = results.FirstOrDefault(option => option.DisplayName.Equals(text, StringComparison.OrdinalIgnoreCase));
+            comboBox.Text = text;
+            if (textBox != null)
+            {
+                textBox.Text = text;
+                textBox.Select(Math.Min(selectionStart, text.Length), Math.Min(selectionLength, text.Length - Math.Min(selectionStart, text.Length)));
+            }
         }
-        _isUpdatingComboFilters = false;
+        finally { _isUpdatingComboFilters = false; }
     }
 
     private void BindCraftingDropdowns()
@@ -750,6 +821,15 @@ public partial class MainWindow : Window
         }
 
         LoadTroopXml(dialog.FileName);
+        SaveSettingsIfEnabled();
+    }
+
+    private void ChooseTroopFolder_Click(object sender, RoutedEventArgs e)
+    {
+        var dialog = new OpenFolderDialog { Title = "Select a troop XML folder", Multiselect = false };
+        if (dialog.ShowDialog(this) != true) return;
+        LoadTroopXml(dialog.FolderName);
+        SaveSettingsIfEnabled();
     }
 
     private void ChooseCraftingPieces_Click(object sender, RoutedEventArgs e)
@@ -788,6 +868,7 @@ public partial class MainWindow : Window
     {
         CraftingPiecesPathBox.Text = filePath;
         _craftingPieces.Clear();
+        _craftingSourceItemId = null;
         ClearCraftingSelections();
 
         try
@@ -806,6 +887,7 @@ public partial class MainWindow : Window
 
             foreach (var piece in pieces)
             {
+                piece.SourcePath = Path.GetFullPath(filePath);
                 _craftingPieces.Add(piece);
             }
 
@@ -1325,15 +1407,14 @@ public partial class MainWindow : Window
                 continue;
             }
 
-            var meshAsset = FindMeshOption(piece.MeshName);
-            if (meshAsset == null)
-            {
-                missing++;
-                continue;
-            }
-
             try
             {
+                var meshAsset = FindEquipmentMesh(piece.MeshName);
+                if (meshAsset == null)
+                {
+                    missing++;
+                    continue;
+                }
                 var model = LoadMeshModel(meshAsset, out _, MeshRenderMode.CraftingPiece, piece.VisualLength);
                 var transforms = new Transform3DGroup();
                 if (piece.Scale != 100)
@@ -1527,13 +1608,18 @@ public partial class MainWindow : Window
         _equipmentCraftingPieces.Clear();
         _equipmentTemplates.Clear();
         _equipmentPieceDefinitions.Clear();
+        _equipmentPieceSourcePaths.Clear();
+        _equipmentItemSourcePaths.Clear();
+        _equipmentTemplateSourcePaths.Clear();
+        _equipmentXmlSourcePaths.Clear();
         _equipmentPreviewModels.Clear();
         _equipmentAssetFolders.Clear();
         _equipmentDependencyMeshes.Clear();
         _equipmentDependenciesIndexed = false;
         var visited = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        _equipmentXmlSourcePaths.UnionWith(_troopSourceFiles.Select(Path.GetFullPath));
 
-        foreach (var sourcePath in new[] { AssetPathBox.Text, troopPath })
+        foreach (var sourcePath in new[] { AssetPathBox.Text, troopPath }.Concat(_troopSourceFiles))
         {
             if (string.IsNullOrWhiteSpace(sourcePath))
             {
@@ -1558,9 +1644,14 @@ public partial class MainWindow : Window
             .Select(pair => new MeshAssetNode { DisplayName = "Item." + pair.Key, Kind = "Item",
                 Status = CleanXmlDisplayText(GetAttributeValue(pair.Value, "name")) ?? pair.Key })
             .OrderBy(option => option.DisplayName, StringComparer.OrdinalIgnoreCase));
+        _armourOptions.Clear();
+        foreach (var type in new[] { "HeadArmor", "Cape", "BodyArmor", "HandArmor", "LegArmor" })
+            _armourOptions[type] = _equipmentItems.Where(pair => string.Equals(GetAttributeValue(pair.Value, "type"), type, StringComparison.OrdinalIgnoreCase))
+                .Select(pair => new MeshAssetNode { DisplayName = "Item." + pair.Key, Kind = "Item",
+                    Status = CleanXmlDisplayText(GetAttributeValue(pair.Value, "name")) ?? pair.Key })
+                .OrderBy(option => option.DisplayName, StringComparer.OrdinalIgnoreCase).ToList();
         var currentLoadout = ReadEquipmentBoxes();
-        FilterEquipmentCombo(Item0Combo, Item0Combo.Text);
-        FilterEquipmentCombo(Item1Combo, Item1Combo.Text);
+        foreach (var comboBox in GetEquipmentCombos()) FilterEquipmentCombo(comboBox, "");
         SetEquipmentBoxes(currentLoadout);
     }
 
@@ -1608,6 +1699,7 @@ public partial class MainWindow : Window
             foreach (var file in files)
             {
                 var document = XDocument.Load(file);
+                _equipmentXmlSourcePaths.Add(Path.GetFullPath(file));
                 foreach (var element in document.Descendants())
                 {
                     if (element.Name.LocalName is "Item" or "CraftedItem")
@@ -1616,6 +1708,7 @@ public partial class MainWindow : Window
                         if (!string.IsNullOrWhiteSpace(id))
                         {
                             _equipmentItems[id] = element;
+                            _equipmentItemSourcePaths[id] = Path.GetFullPath(file);
                         }
                     }
                     else if (element.Name.LocalName.Equals("CraftingPiece", StringComparison.OrdinalIgnoreCase) &&
@@ -1623,10 +1716,13 @@ public partial class MainWindow : Window
                     {
                         _equipmentCraftingPieces[piece.Id] = piece;
                         _equipmentPieceDefinitions[piece.Id] = element;
+                        _equipmentPieceSourcePaths[piece.Id] = file;
+                        piece.SourcePath = Path.GetFullPath(file);
                     }
                     else if (element.Name.LocalName == "CraftingTemplate" && GetAttributeValue(element, "id") is { } templateId)
                     {
                         _equipmentTemplates[templateId] = element;
+                        _equipmentTemplateSourcePaths[templateId] = Path.GetFullPath(file);
                     }
                 }
             }
@@ -1639,38 +1735,62 @@ public partial class MainWindow : Window
     {
         TroopXmlPathBox.Text = filePath;
         _troops.Clear();
+        _activeTroop = null;
+        _troopSourceFiles = [];
 
         try
         {
+            var isFolder = Directory.Exists(filePath);
+            var files = isFolder
+                ? Directory.EnumerateFiles(filePath, "*.xml", SearchOption.AllDirectories)
+                    .OrderBy(path => path, StringComparer.OrdinalIgnoreCase).ToArray()
+                : new[] { filePath };
+            var troops = new Dictionary<string, TroopNode>(StringComparer.OrdinalIgnoreCase);
+            var loadedFiles = new List<string>();
+            var failures = new List<string>();
+            var duplicates = 0;
+            foreach (var file in files)
+            {
+                XDocument document;
+                try { document = XDocument.Load(file); }
+                catch (Exception ex) when (isFolder && ex is System.Xml.XmlException or IOException or UnauthorizedAccessException)
+                {
+                    failures.Add($"{Path.GetRelativePath(filePath, file)}: {ex.Message}");
+                    continue;
+                }
+                loadedFiles.Add(file);
+                foreach (var troop in (document.Root?.DescendantsAndSelf() ?? [])
+                    .Where(IsProbableTroopElement).Select(element => ParseTroopNode(element, file))
+                    .Where(troop => !string.IsNullOrWhiteSpace(troop.Id)))
+                {
+                    if (!troops.TryAdd(troop.Id, troop)) duplicates++;
+                }
+            }
+            _troopSourceFiles = loadedFiles.ToArray();
             LoadEquipmentDefinitions(filePath);
-            var document = XDocument.Load(filePath);
-            var troops = document
-                .Descendants()
-                .Where(IsProbableTroopElement)
-                .Select(ParseTroopNode)
-                .Where(troop => !string.IsNullOrWhiteSpace(troop.Id))
-                .GroupBy(troop => troop.Id, StringComparer.OrdinalIgnoreCase)
-                .Select(group => group.First())
-                .OrderBy(troop => troop.DisplayName)
-                .ToArray();
-
-            foreach (var troop in troops)
+            foreach (var troop in troops.Values.OrderBy(troop => troop.DisplayName, StringComparer.OrdinalIgnoreCase))
             {
                 _troops.Add(troop);
             }
 
-            TroopSummaryText.Text = _troops.Count == 0
-                ? "No troop-like entries found in this XML."
-                : $"Loaded {_troops.Count} troop(s).";
+            _troopLoadSummary = isFolder
+                ? $"Loaded {_troops.Count} troop(s) from {loadedFiles.Count} XML file(s)."
+                : _troops.Count == 0 ? "No troop-like entries found in this XML." : $"Loaded {_troops.Count} troop(s).";
+            if (duplicates > 0) _troopLoadSummary += $" {duplicates} duplicate ID(s) skipped (first entry kept).";
+            if (failures.Count > 0) _troopLoadSummary += $" {failures.Count} unreadable file(s) skipped.";
+            TroopSummaryText.ToolTip = failures.Count == 0 ? null : string.Join(Environment.NewLine, failures);
+            ApplyTroopSearchFilter();
             UpdateTroopXmlExport();
             RefreshTroopPoseLibrary();
 
-            SelectedAssetTitle.Text = "Troop XML loaded";
+            SelectedAssetTitle.Text = isFolder ? "Troop folder loaded" : "Troop XML loaded";
             SelectedAssetSubtitle.Text = "Select a troop or build a custom loadout.";
         }
         catch (Exception ex)
         {
-            TroopSummaryText.Text = $"Could not load XML: {ex.Message}";
+            _troopLoadSummary = $"Could not load troops: {ex.Message}";
+            TroopSummaryText.ToolTip = null;
+            ApplyTroopSearchFilter();
             SelectedAssetTitle.Text = "Troop XML failed";
             SelectedAssetSubtitle.Text = ex.Message;
         }
@@ -1690,19 +1810,21 @@ public partial class MainWindow : Window
                element.Descendants().Any(descendant => descendant.Name.LocalName.Equals("equipment", StringComparison.OrdinalIgnoreCase));
     }
 
-    private static TroopNode ParseTroopNode(XElement element)
+    private static TroopNode ParseTroopNode(XElement element, string filePath)
     {
         var id = GetAttributeValue(element, "id") ?? GetAttributeValue(element, "name") ?? "unnamed_troop";
         var displayName = CleanXmlDisplayText(GetAttributeValue(element, "name")) ?? id;
         var troop = new TroopNode
         {
             Id = id,
-            DisplayName = displayName
+            DisplayName = displayName,
+            SourcePath = Path.GetFullPath(filePath),
+            SourceElementName = element.Name
         };
 
         foreach (var slot in EquipmentSlots)
         {
-            var value = FindEquipmentValue(element, slot);
+            var value = FindEquipmentValue(FirstBattleRoster(element) ?? element, slot);
             if (!string.IsNullOrWhiteSpace(value))
             {
                 troop.Equipment[slot] = value;
@@ -1775,6 +1897,7 @@ public partial class MainWindow : Window
             return;
         }
 
+        _activeTroop = troop;
         SetEquipmentBoxes(troop.Equipment);
         RenderLoadoutPreview(troop.DisplayName, troop.Equipment);
     }
@@ -1807,6 +1930,36 @@ public partial class MainWindow : Window
     private void CustomLoadout_Changed(object sender, RoutedEventArgs e)
     {
         if (!_isUpdatingComboFilters) UpdateTroopXmlExport();
+    }
+
+    private bool IsKnownEquipmentPreviewValue(string value)
+    {
+        value = value.Trim();
+        var id = value.StartsWith("Item.", StringComparison.OrdinalIgnoreCase) ? value[5..] : value;
+        return _equipmentItems.ContainsKey(id) || _meshOptions.Any(mesh => mesh.DisplayName.Equals(value, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private void ScheduleCustomLoadoutPreview()
+    {
+        if (_isUpdatingComboFilters || !IsLoaded || WorkspaceTabs.SelectedIndex != 1) return;
+        _pendingLoadoutPreview?.Abort();
+        _pendingLoadoutPreview = Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Background, new Action(() =>
+        {
+            _pendingLoadoutPreview = null;
+            if (!IsLoaded || WorkspaceTabs.SelectedIndex != 1 || _batchRenderRunning || _turntableRunning || _assetExportRunning) return;
+            var loadout = ReadEquipmentBoxes();
+            foreach (var (slot, value) in loadout.ToArray())
+                if (!IsKnownEquipmentPreviewValue(value))
+                {
+                    if (_troopPreviewLoadout.TryGetValue(slot, out var previous)) loadout[slot] = previous;
+                    else loadout.Remove(slot);
+                }
+            if (_previewWorkspace == 1 && loadout.Count == _troopPreviewLoadout.Count &&
+                loadout.All(pair => _troopPreviewLoadout.TryGetValue(pair.Key, out var previous) && previous.Equals(pair.Value, StringComparison.OrdinalIgnoreCase))) return;
+            var playing = _posePlaybackTimer.IsEnabled;
+            RenderLoadoutPreview(_activeTroop?.DisplayName ?? "Custom loadout", loadout);
+            if (playing && _poseAvailable && _poseClip != null) PosePlay_Click(this, new RoutedEventArgs());
+        }));
     }
 
     private XElement CreateEquipmentRosterXml(IReadOnlyDictionary<string, string> loadout)
@@ -1856,7 +2009,10 @@ public partial class MainWindow : Window
         {
             var loadout = ReadEquipmentBoxes();
             TroopXmlOutputBox.Text = CreateEquipmentRosterXml(loadout).ToString();
-            CopyTroopXmlButton.IsEnabled = ExportTroopXmlButton.IsEnabled = loadout.Count > 0;
+            CopyTroopXmlButton.IsEnabled = loadout.Count > 0;
+            ExportTroopXmlButton.IsEnabled = _activeTroop != null;
+            TroopXmlSourceText.Text = _activeTroop == null ? "" : $"{_activeTroop.Id} - {Path.GetFileName(_activeTroop.SourcePath)}";
+            TroopXmlSourceText.ToolTip = _activeTroop?.SourcePath;
             TroopXmlStatusText.Text = loadout.Count == 0 ? "No equipment selected." : "";
         }
         catch (InvalidOperationException ex)
@@ -1865,6 +2021,20 @@ public partial class MainWindow : Window
             CopyTroopXmlButton.IsEnabled = ExportTroopXmlButton.IsEnabled = false;
             TroopXmlStatusText.Text = ex.Message;
         }
+    }
+
+    private void TroopSearchBox_TextChanged(object sender, TextChangedEventArgs e) => ApplyTroopSearchFilter();
+
+    private void ApplyTroopSearchFilter()
+    {
+        if (TroopSearchBox == null || TroopSummaryText == null) return;
+        var query = TroopSearchBox.Text.Trim();
+        var view = CollectionViewSource.GetDefaultView(_troops);
+        view.Filter = query.Length == 0 ? null : entry => entry is TroopNode troop &&
+            (troop.DisplayName.Contains(query, StringComparison.OrdinalIgnoreCase) ||
+             troop.Id.Contains(query, StringComparison.OrdinalIgnoreCase));
+        TroopSummaryText.Text = query.Length == 0 ? _troopLoadSummary
+            : $"{view.Cast<TroopNode>().Count()} of {_troops.Count} troop(s) match. {_troopLoadSummary}";
     }
 
     private void CopyTroopXml_Click(object sender, RoutedEventArgs e)
@@ -1879,32 +2049,40 @@ public partial class MainWindow : Window
     {
         UpdateTroopXmlExport();
         if (!ExportTroopXmlButton.IsEnabled) return;
-        var dialog = new SaveFileDialog
-        {
-            Title = "Export custom equipment roster", Filter = "XML files (*.xml)|*.xml|All files (*.*)|*.*",
-            FileName = "equipment_roster.xml", DefaultExt = ".xml", AddExtension = true
-        };
-        if (dialog.ShowDialog(this) != true) return;
         try
         {
-            File.WriteAllText(dialog.FileName, TroopXmlOutputBox.Text);
-            TroopXmlStatusText.Text = "Equipment roster exported.";
+            if (!CommitPositionEditorsForSave()) return;
+            var edits = BuildTroopSourceEdits();
+            if (!ConfirmSourceSave(edits)) return;
+            SaveSourceEdits(edits);
+            _activeTroop!.Equipment.Clear();
+            foreach (var (slot, value) in ReadEquipmentBoxes()) _activeTroop.Equipment[slot] = ResolveEquipmentItemReference(slot, value);
+            TroopXmlStatusText.Text = "Saved loadout and equipped item edits to source XML. Backups created.";
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        catch (Exception ex)
         {
-            TroopXmlStatusText.Text = $"Could not export XML: {ex.Message}";
+            TroopXmlStatusText.Text = $"Could not save XML: {ex.Message}";
         }
     }
 
     private void SetEquipmentBoxes(IReadOnlyDictionary<string, string> loadout)
     {
-        SetComboValue(HelmetCombo, GetSlotValue(loadout, "Helmet"));
-        SetComboValue(CapeCombo, GetSlotValue(loadout, "Cape"));
-        SetComboValue(BodyCombo, GetSlotValue(loadout, "Body"));
-        SetComboValue(ArmCombo, GetSlotValue(loadout, "Arm"));
-        SetComboValue(LegCombo, GetSlotValue(loadout, "Leg"));
-        SetComboValue(Item0Combo, GetSlotValue(loadout, "Item0"));
-        SetComboValue(Item1Combo, GetSlotValue(loadout, "Item1"));
+        _pendingLoadoutPreview?.Abort();
+        _pendingLoadoutPreview = null;
+        var wasUpdating = _isUpdatingComboFilters;
+        _isUpdatingComboFilters = true;
+        try
+        {
+            SetComboValue(HelmetCombo, GetSlotValue(loadout, "Helmet"));
+            SetComboValue(CapeCombo, GetSlotValue(loadout, "Cape"));
+            SetComboValue(BodyCombo, GetSlotValue(loadout, "Body"));
+            SetComboValue(ArmCombo, GetSlotValue(loadout, "Arm"));
+            SetComboValue(LegCombo, GetSlotValue(loadout, "Leg"));
+            SetComboValue(Item0Combo, GetSlotValue(loadout, "Item0"));
+            SetComboValue(Item1Combo, GetSlotValue(loadout, "Item1"));
+            _equipmentSearchText.Clear();
+        }
+        finally { _isUpdatingComboFilters = wasUpdating; }
         UpdateTroopXmlExport();
     }
 
@@ -1947,6 +2125,7 @@ public partial class MainWindow : Window
 
     private void RenderLoadoutPreview(string title, IReadOnlyDictionary<string, string> loadout)
     {
+        _troopExportModels.Clear();
         _previewWorkspace = 1;
         StopPosePlayback();
         if (_troopPreviewLoadout.Count != loadout.Count || loadout.Any(pair =>
@@ -1959,6 +2138,7 @@ public partial class MainWindow : Window
         _usedHolsterGroups.Clear();
         _heldEquipmentModels.Clear();
         _assetModel.Children.Clear();
+        if (_craftingPieces.Any(piece => piece.IsDirty)) _equipmentPreviewModels.Clear();
         var assembledLoadout = new Model3DGroup();
 
         if (loadout.Count == 0)
@@ -1967,6 +2147,7 @@ public partial class MainWindow : Window
             SelectedAssetTitle.Text = title;
             SelectedAssetSubtitle.Text = "No equipment selected.";
             RefreshTroopPoseAvailability();
+            RefreshItemPositionEditor();
             return;
         }
 
@@ -1985,6 +2166,7 @@ public partial class MainWindow : Window
                 var model = slot is "Item0" or "Item1"
                     ? LoadHeldEquipmentModel(equipmentName, slot) : LoadEquipmentModel(equipmentName);
                 assembledLoadout.Children.Add(model);
+                _troopExportModels[model] = $"{slot}_{equipmentName}";
                 renderedSlots.Add(slot);
             }
             catch (Exception ex)
@@ -2009,6 +2191,7 @@ public partial class MainWindow : Window
         RefreshTroopPoseAvailability();
         SelectEquipmentHoldingPose();
         RefreshEquipmentStateControls(loadout);
+        RefreshItemPositionEditor();
     }
 
     private Model3D LoadEquipmentModel(string equipmentName)
@@ -2055,15 +2238,18 @@ public partial class MainWindow : Window
                 throw new InvalidOperationException($"Crafting piece '{id}' was not found in module XML.");
             }
 
+            definition = _craftingPieces.FirstOrDefault(piece => piece.Id == id && piece.IsDirty) ?? definition;
+            var offsets = _itemPositions.GetValueOrDefault(GetAttributeValue(item, "id") ?? "")?.Pieces?.GetValueOrDefault(id);
+
             var piece = new CraftingPieceNode
             {
                 MeshName = definition.MeshName,
                 Length = definition.Length,
                 DistanceToNextPiece = definition.DistanceToNextPiece,
                 DistanceToPreviousPiece = definition.DistanceToPreviousPiece,
-                PieceOffset = definition.PieceOffset,
-                PreviousPieceOffset = definition.PreviousPieceOffset,
-                NextPieceOffset = definition.NextPieceOffset,
+                PieceOffset = offsets?.PieceOffset ?? definition.PieceOffset,
+                PreviousPieceOffset = offsets?.PreviousPieceOffset ?? definition.PreviousPieceOffset,
+                NextPieceOffset = offsets?.NextPieceOffset ?? definition.NextPieceOffset,
                 Scale = int.TryParse(GetAttributeValue(reference, "scale_factor"), NumberStyles.Integer, CultureInfo.InvariantCulture, out var scale) ? scale : 100
             };
             pieces[GetAttributeValue(reference, "Type") ?? definition.PieceType] = piece;
@@ -2073,7 +2259,12 @@ public partial class MainWindow : Window
         _equipmentTemplates.TryGetValue(template, out var templateDefinition);
         var hiddenTypes = (GetAttributeValue(templateDefinition ?? item, "hidden_piece_types_on_holster") ?? "").Split(':');
         var useWeapon = GetAttributeValue(templateDefinition ?? item, "use_weapon_as_holster_mesh") == "true";
+        var authoredOrder = templateDefinition?.Descendants("PieceData").Select(element => (
+            Type: GetAttributeValue(element, "piece_type") ?? "",
+            Order: int.TryParse(GetAttributeValue(element, "build_order"), NumberStyles.Integer, CultureInfo.InvariantCulture, out var value) ? value : 0))
+            .Where(entry => entry.Type.Length > 0).ToArray() ?? [];
         var order = _craftingTemplateBuildOrders.TryGetValue(template, out var loadedOrder) ? loadedOrder
+            : authoredOrder.Length > 0 ? authoredOrder
             : BundledCraftingBuildOrders.TryGetValue(template, out var bundledOrder) ? bundledOrder
             : throw new InvalidOperationException($"Crafting template '{template}' has no build order.");
         var pivots = CalculateCraftingPivots(pieces, order, out _);
@@ -2299,6 +2490,7 @@ public partial class MainWindow : Window
 
     private void RenderSelectedAsset(MeshAssetNode asset)
     {
+        _exportSelectedAsset = asset;
         _previewWorkspace = 0;
         SuspendTroopPose();
         SelectedAssetTitle.Text = asset.DisplayName;
@@ -2329,7 +2521,9 @@ public partial class MainWindow : Window
         MeshAssetNode asset,
         out int renderedVertices,
         MeshRenderMode renderMode = MeshRenderMode.AssetPreview,
-        float targetLength = 0)
+        float targetLength = 0,
+        bool allLods = false,
+        Action<string>? onSkipped = null)
     {
         var package = new AssetPackage(asset.SourcePath, loadHeaderNow: true, loadDataNow: false,
             assetTypes: PreviewAssetTypes, assetGuids: new HashSet<Guid> { asset.MetameshGuid }, assetFilter: ShouldParseAsset);
@@ -2341,10 +2535,11 @@ public partial class MainWindow : Window
 
         var model = new Model3DGroup();
         renderedVertices = 0;
-        foreach (var mesh in GetHighestDetailMeshes(metamesh))
+        foreach (var mesh in allLods ? metamesh.Meshes.AsEnumerable() : GetHighestDetailMeshes(metamesh))
         {
             if (mesh.VertexStream == null && mesh.EditData == null)
             {
+                onSkipped?.Invoke($"{mesh.Name}, LOD {mesh.Lod}: no geometry stream was available.");
                 continue;
             }
 
@@ -2353,6 +2548,8 @@ public partial class MainWindow : Window
                 ? CreateTpacMeshModel(mesh.VertexStream.Data, asset.DisplayName, materialResult.Material, MeshRenderMode.Raw, 0, out var partVertices)
                 : CreateTpacEditMeshModel(mesh.EditData!.Data, asset.DisplayName, materialResult.Material, MeshRenderMode.Raw, 0, out partVertices);
             model.Children.Add(part);
+            AssetExportMetadata.SetName((MeshGeometry3D)part.Geometry, $"{mesh.Name}_LOD{mesh.Lod}");
+            AssetExportMetadata.SetHuman((MeshGeometry3D)part.Geometry, metamesh.UnknownString);
             renderedVertices += partVertices;
         }
 
@@ -2468,6 +2665,7 @@ public partial class MainWindow : Window
         }
 
         StudioRenderer.RegisterSkinning(mesh, vertexStream);
+        AssetExportMetadata.SetStream(mesh, vertexStream);
         return CreateModel(mesh, material, ColorFromName(name));
     }
 
@@ -2529,6 +2727,7 @@ public partial class MainWindow : Window
             }
         }
 
+        AssetExportMetadata.SetEdit(mesh, editData);
         return CreateModel(mesh, material, ColorFromName(name));
     }
 
@@ -2628,8 +2827,11 @@ public partial class MainWindow : Window
                 .GroupBy(item => item.Guid)
                 .ToDictionary(group => group.Key, group => group.First());
 
+            TpacTool.Lib.Material? exportSource = null;
+
             foreach (var material in GetExternalMaterialCandidates(materials, metamesh, mesh))
             {
+                exportSource ??= material;
                 resolvedMaterialCount++;
                 textureRefCount += material.Textures.Count;
 
@@ -2660,6 +2862,7 @@ public partial class MainWindow : Window
 
             foreach (var material in GetDependencyMaterialCandidates(package, metamesh, mesh))
             {
+                exportSource ??= material;
                 resolvedMaterialCount++;
                 textureRefCount += material.Textures.Count;
 
@@ -2707,8 +2910,18 @@ public partial class MainWindow : Window
                     continue;
                 }
 
-                return new MaterialLoadResult(new DiffuseMaterial(brush),
+                var fallback = new DiffuseMaterial(brush);
+                var textureSource = new TpacTool.Lib.Material { Name = fallbackName };
+                textureSource.Textures[0] = new AssetDependence<Texture>(texture);
+                _exportMaterials.Add(fallback, new(textureSource, textures));
+                return new MaterialLoadResult(fallback,
                     $"texture: applied dependency texture {texture.Name} ({texture.Width}x{texture.Height}, {texture.Format}, score {TextureScore(texture)})");
+            }
+            if (exportSource != null)
+            {
+                var fallback = new DiffuseMaterial(new SolidColorBrush(ColorFromName(fallbackName)));
+                _exportMaterials.Add(fallback, new(exportSource, textures));
+                return new MaterialLoadResult(fallback, "Original material textures could not be decoded for preview.");
             }
         }
         catch (Exception ex)
@@ -3006,6 +3219,7 @@ public partial class MainWindow : Window
         out string status)
     {
         var diffuse = new DiffuseMaterial(diffuseBrush);
+        _exportMaterials.Add(diffuse, new(source, textures));
         status = "no metallic/gloss map";
         try
         {
@@ -3390,6 +3604,7 @@ public sealed class CraftingPieceNode
     public static readonly CraftingPieceNode Empty = new() { Id = "(None)" };
 
     public string Id { get; set; } = string.Empty;
+    public string SourcePath { get; set; } = string.Empty;
     public string PieceType { get; set; } = string.Empty;
     public string MeshName { get; set; } = string.Empty;
     public float Length { get; set; }
@@ -3433,11 +3648,20 @@ public sealed class AppSettings
     public string? AssetPackagesPath { get; init; }
     public string? CraftingPiecesPath { get; init; }
     public string? CraftingTemplatesPath { get; init; }
+    public string? TroopsPath { get; init; }
+    public RenderExportSettings? Render { get; init; }
+    public BatchRenderOptions? BatchRender { get; init; }
+    public TurntableOptions? Turntable { get; init; }
+    public TurntableOptions? BatchTurntable { get; init; }
+    public AssetExportOptions? AssetExport { get; init; }
+    public Dictionary<string, ItemPositionTuning>? ItemPositions { get; init; }
 }
 
 public sealed class TroopNode
 {
     public string Id { get; init; } = string.Empty;
     public string DisplayName { get; init; } = string.Empty;
+    public string SourcePath { get; init; } = string.Empty;
+    public XName SourceElementName { get; init; } = "NPCCharacter";
     public Dictionary<string, string> Equipment { get; } = new(StringComparer.OrdinalIgnoreCase);
 }

@@ -19,6 +19,56 @@
         <SolidColorBrush x:Key="AccentBrush" Color="#BD9C2A" />
         <SolidColorBrush x:Key="MutedBrush" Color="#8F8B78" />
 
+        <Style x:Key="InspectorSectionStyle" TargetType="Expander">
+            <Setter Property="Foreground" Value="#ECE8D8" />
+            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Expander">
+                        <StackPanel>
+                            <ToggleButton Content="{TemplateBinding Header}" Foreground="{TemplateBinding Foreground}"
+                                          IsChecked="{Binding IsExpanded, RelativeSource={RelativeSource TemplatedParent}, Mode=TwoWay}"
+                                          HorizontalContentAlignment="Stretch" Cursor="Hand">
+                                <ToggleButton.Template>
+                                    <ControlTemplate TargetType="ToggleButton">
+                                        <Border x:Name="HeaderBorder" Background="Transparent" BorderBrush="#23303B"
+                                                BorderThickness="0,0,0,1" Padding="14,0" Height="42">
+                                            <Grid>
+                                                <Grid.ColumnDefinitions><ColumnDefinition /><ColumnDefinition Width="24" /></Grid.ColumnDefinitions>
+                                                <ContentPresenter VerticalAlignment="Center" />
+                                                <TextBlock x:Name="Chevron" Grid.Column="1" FontFamily="Segoe MDL2 Assets" Text="&#xE76C;"
+                                                           FontSize="10" HorizontalAlignment="Right" VerticalAlignment="Center" />
+                                            </Grid>
+                                        </Border>
+                                        <ControlTemplate.Triggers>
+                                            <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="HeaderBorder" Property="Background" Value="#182129" /></Trigger>
+                                            <Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="HeaderBorder" Property="BorderBrush" Value="{StaticResource AccentBrush}" /></Trigger>
+                                            <Trigger Property="IsChecked" Value="True">
+                                                <Setter TargetName="Chevron" Property="Text" Value="&#xE70D;" />
+                                                <Setter Property="Foreground" Value="{StaticResource AccentBrush}" />
+                                            </Trigger>
+                                        </ControlTemplate.Triggers>
+                                    </ControlTemplate>
+                                </ToggleButton.Template>
+                            </ToggleButton>
+                            <Border x:Name="SectionContent" Padding="14,10,14,14" Visibility="Collapsed">
+                                <ContentPresenter ContentSource="Content" />
+                            </Border>
+                        </StackPanel>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsExpanded" Value="True"><Setter TargetName="SectionContent" Property="Visibility" Value="Visible" /></Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="InspectorPreviewStyle" TargetType="Expander" BasedOn="{StaticResource InspectorSectionStyle}">
+            <Setter Property="Margin" Value="-14,8,-14,4" />
+            <Setter Property="Foreground" Value="{StaticResource MutedBrush}" />
+            <Setter Property="FontSize" Value="11" />
+        </Style>
+
         <Style TargetType="Button">
             <Setter Property="Background" Value="#2A281A" />
             <Setter Property="BorderBrush" Value="#4A4324" />
@@ -293,13 +343,22 @@
                                            Foreground="{StaticResource MutedBrush}"
                                            FontSize="12"
                                            Text="No packages loaded." />
-                                <Button x:Name="BatchRenderButton" Grid.Row="2" Grid.ColumnSpan="2" Margin="0,10,0,0"
+                                <Grid Grid.Row="2" Grid.ColumnSpan="2" Margin="0,10,0,0">
+                                    <Grid.ColumnDefinitions><ColumnDefinition /><ColumnDefinition Width="8" /><ColumnDefinition /></Grid.ColumnDefinitions>
+                                <Button x:Name="BatchRenderButton"
                                         Click="BatchRender_Click" ToolTip="Batch render parsed meshes">
                                     <StackPanel Orientation="Horizontal">
                                         <TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xE722;" Margin="0,0,8,0" VerticalAlignment="Center" />
                                         <TextBlock Text="Batch Render" />
                                     </StackPanel>
                                 </Button>
+                                <Button Grid.Column="2" Click="BatchTurntableExport_Click" ToolTip="Batch export turntables of parsed meshes" Padding="5,6">
+                                    <StackPanel Orientation="Horizontal">
+                                        <TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xE7AD;" Margin="0,0,6,0" VerticalAlignment="Center" />
+                                        <TextBlock Text="Batch Turntables" FontSize="12" />
+                                    </StackPanel>
+                                </Button>
+                                </Grid>
                             </Grid>
 
                             <Border Grid.Row="1"
@@ -357,16 +416,23 @@
                                     </Grid.ColumnDefinitions>
                                     <TextBox x:Name="TroopXmlPathBox"
                                              IsReadOnly="True"
-                                             Text="Select troop XML..." />
-                                    <Button Grid.Column="1"
-                                            Margin="8,0,0,0"
-                                            Click="ChooseTroopXml_Click"
-                                            Content="XML" />
+                                             Text="Select troop XML or folder..." />
+                                    <StackPanel Grid.Column="1" Orientation="Horizontal">
+                                        <Button Margin="8,0,0,0" Width="34" Padding="0"
+                                                Click="ChooseTroopXml_Click" ToolTip="Open troop XML">
+                                            <TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xE8A5;" FontSize="14" />
+                                        </Button>
+                                        <Button Margin="6,0,0,0" Width="34" Padding="0"
+                                                Click="ChooseTroopFolder_Click" ToolTip="Open troop folder">
+                                            <TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xE8B7;" FontSize="14" />
+                                        </Button>
+                                    </StackPanel>
                                 </Grid>
 
                                 <TextBlock x:Name="TroopSummaryText"
                                            Foreground="{StaticResource MutedBrush}"
                                            FontSize="12"
+                                           TextWrapping="Wrap"
                                            Text="No troop XML loaded." />
 
                                 <Border Margin="0,10,0,14"
@@ -374,20 +440,31 @@
                                         BorderBrush="#292817"
                                         BorderThickness="1"
                                         CornerRadius="4">
-                                    <ListBox x:Name="TroopList"
-                                             Margin="6"
+                                    <Grid Margin="6">
+                                        <Grid.RowDefinitions>
+                                            <RowDefinition Height="Auto" />
+                                            <RowDefinition Height="*" />
+                                        </Grid.RowDefinitions>
+                                        <TextBox x:Name="TroopSearchBox" Margin="0,0,0,8"
+                                                 ToolTip="Search troops by name or ID"
+                                                 TextChanged="TroopSearchBox_TextChanged" />
+                                    <ListBox x:Name="TroopList" Grid.Row="1"
+                                             ScrollViewer.HorizontalScrollBarVisibility="Disabled"
                                              SelectionChanged="TroopList_SelectionChanged">
                                         <ListBox.ItemTemplate>
                                             <DataTemplate>
                                                 <StackPanel Margin="0,3">
-                                                    <TextBlock Text="{Binding DisplayName}" FontWeight="SemiBold" />
+                                                    <TextBlock Text="{Binding DisplayName}" FontWeight="SemiBold"
+                                                               TextTrimming="CharacterEllipsis" ToolTip="{Binding DisplayName}" />
                                                     <TextBlock Text="{Binding Id}"
                                                                Foreground="{StaticResource MutedBrush}"
+                                                               TextTrimming="CharacterEllipsis" ToolTip="{Binding Id}"
                                                                FontSize="11" />
                                                 </StackPanel>
                                             </DataTemplate>
                                         </ListBox.ItemTemplate>
                                     </ListBox>
+                                    </Grid>
                                 </Border>
 
                                 <TextBlock Text="CUSTOM LOADOUT"
@@ -732,7 +809,7 @@
                 </hx:Viewport3DX.Camera>
             </hx:Viewport3DX>
 
-            <Grid VerticalAlignment="Top" Margin="24">
+            <Grid VerticalAlignment="Stretch" Margin="24,24,24,78">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*" />
                     <ColumnDefinition Width="Auto" />
@@ -770,26 +847,68 @@
                 </StackPanel>
             </Border>
 
-            <StackPanel Grid.Column="1" HorizontalAlignment="Right" VerticalAlignment="Top" Width="380">
-            <Border x:Name="CraftingEditorPanel"
-                    Grid.Column="1"
-                    HorizontalAlignment="Right"
-                    VerticalAlignment="Top"
-                    Width="380"
-                    Background="#DD0B1016"
-                    BorderBrush="#23303B"
-                    BorderThickness="1"
-                    CornerRadius="4"
-                    Padding="14,12"
-                    Visibility="Collapsed">
-                <ScrollViewer MaxHeight="690" VerticalScrollBarVisibility="Auto">
+            <Grid x:Name="InspectorHost" Grid.Column="1" HorizontalAlignment="Right">
+            <Border x:Name="ViewportInspector" VerticalAlignment="Top" MaxHeight="{Binding ActualHeight, ElementName=InspectorHost}"
+                    Background="#F20B1016" BorderBrush="#23303B" BorderThickness="1" CornerRadius="4">
+                <Border.Style>
+                    <Style TargetType="Border">
+                        <Setter Property="Width" Value="380" />
+                        <Style.Triggers>
+                            <DataTrigger Binding="{Binding IsChecked, ElementName=InspectorCollapseToggle}" Value="True"><Setter Property="Width" Value="40" /></DataTrigger>
+                            <MultiDataTrigger>
+                                <MultiDataTrigger.Conditions>
+                                    <Condition Binding="{Binding Visibility, ElementName=CraftingEditorPanel}" Value="Collapsed" />
+                                    <Condition Binding="{Binding Visibility, ElementName=ItemPositionEditorPanel}" Value="Collapsed" />
+                                    <Condition Binding="{Binding Visibility, ElementName=TableauColourPanel}" Value="Collapsed" />
+                                    <Condition Binding="{Binding Visibility, ElementName=TroopXmlExportPanel}" Value="Collapsed" />
+                                </MultiDataTrigger.Conditions>
+                                <Setter Property="Visibility" Value="Collapsed" />
+                            </MultiDataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </Border.Style>
+                <Grid>
+                    <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition /></Grid.RowDefinitions>
+                    <Grid Height="40">
+                        <Grid.ColumnDefinitions><ColumnDefinition /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                        <TextBlock Text="INSPECTOR" Margin="14,0,0,0" VerticalAlignment="Center"
+                                   FontSize="11" FontWeight="SemiBold" Foreground="{StaticResource MutedBrush}">
+                            <TextBlock.Style><Style TargetType="TextBlock"><Style.Triggers>
+                                <DataTrigger Binding="{Binding IsChecked, ElementName=InspectorCollapseToggle}" Value="True"><Setter Property="Visibility" Value="Collapsed" /></DataTrigger>
+                            </Style.Triggers></Style></TextBlock.Style>
+                        </TextBlock>
+                        <ToggleButton x:Name="InspectorCollapseToggle" Grid.Column="1" Width="28" Height="28" Margin="5,0"
+                                      IsChecked="False" Cursor="Hand" Foreground="#ECE8D8">
+                            <ToggleButton.Style>
+                                <Style TargetType="ToggleButton">
+                                    <Setter Property="ToolTip" Value="Hide inspector" />
+                                    <Setter Property="Template"><Setter.Value>
+                                        <ControlTemplate TargetType="ToggleButton">
+                                            <Border x:Name="ToggleBorder" Background="Transparent" CornerRadius="3">
+                                                <TextBlock x:Name="ToggleGlyph" FontFamily="Segoe MDL2 Assets" Text="&#xE70E;" FontSize="13"
+                                                           HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                            </Border>
+                                            <ControlTemplate.Triggers>
+                                                <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="ToggleBorder" Property="Background" Value="#23303B" /></Trigger>
+                                                <Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="ToggleBorder" Property="Background" Value="#23303B" /></Trigger>
+                                                <Trigger Property="IsChecked" Value="True"><Setter TargetName="ToggleGlyph" Property="Text" Value="&#xE713;" /></Trigger>
+                                            </ControlTemplate.Triggers>
+                                        </ControlTemplate>
+                                    </Setter.Value></Setter>
+                                    <Style.Triggers><Trigger Property="IsChecked" Value="True"><Setter Property="ToolTip" Value="Show inspector" /></Trigger></Style.Triggers>
+                                </Style>
+                            </ToggleButton.Style>
+                        </ToggleButton>
+                    </Grid>
+                    <ScrollViewer x:Name="InspectorSectionsScroll" Grid.Row="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                        <ScrollViewer.Style><Style TargetType="ScrollViewer"><Style.Triggers>
+                            <DataTrigger Binding="{Binding IsChecked, ElementName=InspectorCollapseToggle}" Value="True"><Setter Property="Visibility" Value="Collapsed" /></DataTrigger>
+                        </Style.Triggers></Style></ScrollViewer.Style>
+            <StackPanel>
+            <Border x:Name="CraftingEditorPanel" Visibility="Collapsed">
+                <Expander x:Name="CraftingInspectorSection" Header="Offset editor" Style="{StaticResource InspectorSectionStyle}" Expanded="InspectorSection_Expanded">
                     <StackPanel>
-                        <TextBlock Text="OFFSET EDITOR"
-                                   Foreground="{StaticResource AccentBrush}"
-                                   FontSize="11"
-                                   FontWeight="Bold" />
                         <TextBlock x:Name="CraftingActivePieceText"
-                                   Margin="0,8,0,0"
                                    Text="Select a piece to edit."
                                    FontWeight="SemiBold" />
                         <TextBlock Text="Step"
@@ -841,44 +960,119 @@
                         <TextBlock Text="scale_factor (%)" Margin="0,10,0,4" Foreground="{StaticResource MutedBrush}" />
                         <TextBox x:Name="CraftingScaleBox" LostFocus="CraftingOffsetBox_LostFocus" KeyDown="CraftingOffsetBox_KeyDown" />
 
-                        <TextBlock Text="XML OUTPUT"
-                                   Margin="0,14,0,8"
-                                   Foreground="{StaticResource AccentBrush}"
-                                   FontSize="11"
-                                   FontWeight="Bold" />
+                        <Expander x:Name="CraftingXmlPreview" Header="XML preview" Style="{StaticResource InspectorPreviewStyle}">
                         <TextBox x:Name="CraftingXmlOutputBox"
                                  Height="130"
                                  IsReadOnly="True"
                                  TextWrapping="Wrap"
                                  VerticalScrollBarVisibility="Auto"
                                  FontFamily="Consolas" />
+                        </Expander>
                         <Button Margin="0,8,0,0"
                                 Click="CopyCraftingBuildData_Click"
-                                Content="Copy BuildData to Clipboard" />
+                                Content="Copy XML" />
+                        <Button Margin="0,8,0,0"
+                                Click="SaveCraftingSourceXml_Click" ToolTip="Save crafting edits to their source XML, with backups"
+                                Content="Save XML" />
                         <Button Margin="0,8,0,0"
                                 Click="ExportCraftingOffsets_Click"
                                 Content="Export tuned offsets (JSON)" />
                     </StackPanel>
-                </ScrollViewer>
+                </Expander>
             </Border>
 
-            <Border x:Name="TableauColourPanel"
-                    Grid.Column="1"
-                    HorizontalAlignment="Right"
-                    VerticalAlignment="Top"
-                    Width="380"
-                    Background="#DD0B1016"
-                    BorderBrush="#23303B"
-                    BorderThickness="1"
-                    CornerRadius="4"
-                    Padding="14,12"
-                    Visibility="Collapsed">
+            <Border x:Name="ItemPositionEditorPanel" Visibility="Collapsed">
+                <Expander x:Name="ItemPositionInspectorSection" Header="Equipment position" Style="{StaticResource InspectorSectionStyle}" Expanded="InspectorSection_Expanded">
+                    <StackPanel>
+                        <ComboBox x:Name="ItemPositionItemCombo" IsEditable="False" SelectionChanged="ItemPositionSelection_Changed">
+                            <ComboBox.ItemTemplate><DataTemplate><TextBlock Text="{Binding}" TextTrimming="CharacterEllipsis" ToolTip="{Binding}" /></DataTemplate></ComboBox.ItemTemplate>
+                        </ComboBox>
+                        <ComboBox x:Name="ItemPositionModeCombo" Margin="0,8,0,0" IsEditable="False" SelectedIndex="0" SelectionChanged="ItemPositionSelection_Changed">
+                            <ComboBoxItem Content="Held" /><ComboBoxItem Content="Holstered / carried" />
+                        </ComboBox>
+                        <Grid x:Name="ItemPositionAttachmentSteps" Margin="0,10,0,0">
+                            <Grid.ColumnDefinitions><ColumnDefinition /><ColumnDefinition Width="10" /><ColumnDefinition /></Grid.ColumnDefinitions>
+                            <StackPanel><TextBlock Text="Position step (cm)" Foreground="{StaticResource MutedBrush}" Margin="0,0,0,4" />
+                                <ComboBox x:Name="ItemPositionStepCombo" IsEditable="False" SelectedIndex="2"><ComboBoxItem Content="0.1" /><ComboBoxItem Content="0.5" /><ComboBoxItem Content="1" /><ComboBoxItem Content="5" /></ComboBox>
+                            </StackPanel>
+                            <StackPanel Grid.Column="2"><TextBlock Text="Rotation step (degrees)" Foreground="{StaticResource MutedBrush}" Margin="0,0,0,4" />
+                                <ComboBox x:Name="ItemRotationStepCombo" IsEditable="False" SelectedIndex="1"><ComboBoxItem Content="1" /><ComboBoxItem Content="5" /><ComboBoxItem Content="15" /></ComboBox>
+                            </StackPanel>
+                        </Grid>
+                        <StackPanel x:Name="ItemPositionFields">
+                            <TextBlock Text="Position / shift (cm)" Foreground="{StaticResource MutedBrush}" Margin="0,10,0,3" />
+                            <StackPanel x:Name="ItemPositionTranslationRows" />
+                            <TextBlock x:Name="ItemPositionRotationLabel" Text="Rotation (degrees)" Foreground="{StaticResource MutedBrush}" Margin="0,10,0,3" />
+                            <StackPanel x:Name="ItemPositionRotationRows" />
+                        </StackPanel>
+                        <Expander x:Name="TroopCraftingOffsetsPanel" Header="Crafting piece offsets" Style="{StaticResource InspectorPreviewStyle}"
+                                  IsExpanded="True" Visibility="Collapsed">
+                            <StackPanel x:Name="TroopCraftingOffsetFields">
+                                <ComboBox x:Name="TroopCraftingPieceCombo" IsEditable="False" SelectionChanged="TroopCraftingPiece_Changed">
+                                    <ComboBox.ItemTemplate><DataTemplate><TextBlock Text="{Binding}" TextTrimming="CharacterEllipsis" ToolTip="{Binding}" /></DataTemplate></ComboBox.ItemTemplate>
+                                </ComboBox>
+                                <Grid Margin="0,8,0,0">
+                                    <Grid.ColumnDefinitions><ColumnDefinition /><ColumnDefinition Width="100" /><ColumnDefinition Width="42" /></Grid.ColumnDefinitions>
+                                    <TextBlock Text="Offset step (cm)" VerticalAlignment="Center" Foreground="{StaticResource MutedBrush}" />
+                                    <ComboBox x:Name="TroopCraftingStepCombo" Grid.Column="1" IsEditable="False" SelectedIndex="2">
+                                        <ComboBoxItem Content="0.1" /><ComboBoxItem Content="0.5" /><ComboBoxItem Content="1" /><ComboBoxItem Content="5" />
+                                    </ComboBox>
+                                    <Button Grid.Column="2" Width="34" Height="30" Padding="0" HorizontalAlignment="Right" ToolTip="Reset selected piece offsets" Click="TroopCraftingReset_Click">
+                                        <TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xE72C;" />
+                                    </Button>
+                                </Grid>
+                                <TextBlock Text="piece_offset (cm)" Margin="0,10,0,4" Foreground="{StaticResource MutedBrush}" />
+                                <Grid>
+                                    <Grid.ColumnDefinitions><ColumnDefinition /><ColumnDefinition Width="34" /><ColumnDefinition Width="34" /></Grid.ColumnDefinitions>
+                                    <TextBox x:Name="TroopCraftingOffsetBox" LostFocus="TroopCraftingOffset_LostFocus" KeyDown="TroopCraftingOffset_KeyDown" />
+                                    <Button Grid.Column="1" Margin="6,0,0,0" Padding="0" Content="-" Tag="0,-1" ToolTip="Decrease piece offset" Click="TroopCraftingOffsetStep_Click" />
+                                    <Button Grid.Column="2" Margin="6,0,0,0" Padding="0" Content="+" Tag="0,1" ToolTip="Increase piece offset" Click="TroopCraftingOffsetStep_Click" />
+                                </Grid>
+                                <TextBlock Text="previous_piece_offset (cm)" Margin="0,10,0,4" Foreground="{StaticResource MutedBrush}" />
+                                <Grid>
+                                    <Grid.ColumnDefinitions><ColumnDefinition /><ColumnDefinition Width="34" /><ColumnDefinition Width="34" /></Grid.ColumnDefinitions>
+                                    <TextBox x:Name="TroopCraftingPreviousBox" LostFocus="TroopCraftingOffset_LostFocus" KeyDown="TroopCraftingOffset_KeyDown" />
+                                    <Button Grid.Column="1" Margin="6,0,0,0" Padding="0" Content="-" Tag="1,-1" ToolTip="Decrease previous-piece offset" Click="TroopCraftingOffsetStep_Click" />
+                                    <Button Grid.Column="2" Margin="6,0,0,0" Padding="0" Content="+" Tag="1,1" ToolTip="Increase previous-piece offset" Click="TroopCraftingOffsetStep_Click" />
+                                </Grid>
+                                <TextBlock Text="next_piece_offset (cm)" Margin="0,10,0,4" Foreground="{StaticResource MutedBrush}" />
+                                <Grid>
+                                    <Grid.ColumnDefinitions><ColumnDefinition /><ColumnDefinition Width="34" /><ColumnDefinition Width="34" /></Grid.ColumnDefinitions>
+                                    <TextBox x:Name="TroopCraftingNextBox" LostFocus="TroopCraftingOffset_LostFocus" KeyDown="TroopCraftingOffset_KeyDown" />
+                                    <Button Grid.Column="1" Margin="6,0,0,0" Padding="0" Content="-" Tag="2,-1" ToolTip="Decrease next-piece offset" Click="TroopCraftingOffsetStep_Click" />
+                                    <Button Grid.Column="2" Margin="6,0,0,0" Padding="0" Content="+" Tag="2,1" ToolTip="Increase next-piece offset" Click="TroopCraftingOffsetStep_Click" />
+                                </Grid>
+                            </StackPanel>
+                        </Expander>
+                        <StackPanel Orientation="Horizontal" Margin="0,10,0,0">
+                            <Button x:Name="ItemPositionUndoButton" Width="36" Padding="0" Height="30" ToolTip="Undo item adjustment" Click="ItemPositionHistory_Click"><TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xE7A7;" /></Button>
+                            <Button x:Name="ItemPositionRedoButton" Width="36" Padding="0" Height="30" Margin="6,0,0,0" ToolTip="Redo item adjustment" Click="ItemPositionHistory_Click"><TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xE7A6;" /></Button>
+                            <Button x:Name="ItemPositionResetButton" Width="36" Padding="0" Height="30" Margin="6,0,0,0" ToolTip="Reset this attachment mode" Click="ItemPositionHistory_Click"><TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xE72C;" /></Button>
+                            <Button x:Name="ItemPositionCraftingButton" Content="Open in crafting" Margin="10,0,0,0" Padding="8,4" Visibility="Collapsed" Click="ItemPositionCrafting_Click" />
+                        </StackPanel>
+                        <Expander x:Name="ItemPositionXmlPreview" Header="XML preview" Style="{StaticResource InspectorPreviewStyle}">
+                        <TextBox x:Name="ItemPositionXmlBox" Height="115" IsReadOnly="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" FontFamily="Consolas" />
+                        </Expander>
+                        <ComboBox x:Name="ItemPositionExportModeCombo" IsEditable="False" SelectedIndex="0" Margin="0,8,0,0" ToolTip="XML preview and clipboard format" SelectionChanged="ItemPositionSelection_Changed">
+                            <ComboBoxItem Content="Positioning only" /><ComboBoxItem Content="Full item definition" />
+                        </ComboBox>
+                        <Grid Margin="0,8,0,0">
+                            <Grid.ColumnDefinitions><ColumnDefinition /><ColumnDefinition Width="8" /><ColumnDefinition /></Grid.ColumnDefinitions>
+                            <Button Click="CopyItemPositionXml_Click" ToolTip="Copy item positioning and any companion definitions">
+                                <StackPanel Orientation="Horizontal"><TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xE8C8;" Margin="0,0,8,0" /><TextBlock Text="Copy XML" /></StackPanel>
+                            </Button>
+                            <Button Grid.Column="2" Click="SaveItemPositionXml_Click" ToolTip="Save item edits directly to source XML, with backups">
+                                <StackPanel Orientation="Horizontal"><TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xE74E;" Margin="0,0,8,0" /><TextBlock Text="Save XML" /></StackPanel>
+                            </Button>
+                        </Grid>
+                        <TextBlock x:Name="ItemPositionStatusText" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Margin="0,8,0,0" />
+                    </StackPanel>
+                </Expander>
+            </Border>
+            <Border x:Name="TableauColourPanel" Visibility="Collapsed">
+                <Expander x:Name="TableauInspectorSection" Header="Faction colours" Style="{StaticResource InspectorSectionStyle}" Expanded="InspectorSection_Expanded">
                 <StackPanel>
-                    <TextBlock Text="FACTION COLOURS"
-                               Foreground="{StaticResource AccentBrush}"
-                               FontSize="11"
-                               FontWeight="Bold" />
-                    <TextBlock Text="Primary" Margin="0,12,0,4" Foreground="{StaticResource MutedBrush}" />
+                    <TextBlock Text="Primary" Margin="0,0,0,4" Foreground="{StaticResource MutedBrush}" />
                     <Grid>
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="*" />
@@ -905,28 +1099,14 @@
                                 Background="White" ToolTip="Choose secondary colour" Click="TableauColourPicker_Click" />
                     </Grid>
                 </StackPanel>
+                </Expander>
             </Border>
-            <Border x:Name="TroopXmlExportPanel"
-                    Background="#DD0B1016"
-                    BorderBrush="#23303B"
-                    BorderThickness="1"
-                    CornerRadius="4"
-                    Padding="14,12"
-                    Visibility="Collapsed">
-                <Border.Style>
-                    <Style TargetType="Border">
-                        <Style.Triggers>
-                            <DataTrigger Binding="{Binding Visibility, ElementName=TableauColourPanel}" Value="Visible">
-                                <Setter Property="Margin" Value="0,12,0,0" />
-                            </DataTrigger>
-                        </Style.Triggers>
-                    </Style>
-                </Border.Style>
+            <Border x:Name="TroopXmlExportPanel" Visibility="Collapsed">
+                <Expander x:Name="TroopXmlInspectorSection" Header="Equipment roster XML" Style="{StaticResource InspectorSectionStyle}" Expanded="InspectorSection_Expanded">
                 <StackPanel>
-                    <TextBlock Text="EQUIPMENT ROSTER XML"
-                               Foreground="{StaticResource AccentBrush}"
-                               FontSize="11" FontWeight="Bold" />
-                    <TextBox x:Name="TroopXmlOutputBox" Margin="0,10,0,0" Height="180"
+                    <TextBlock x:Name="TroopXmlSourceText" Margin="0,0,0,8" FontSize="11"
+                               Foreground="{StaticResource MutedBrush}" TextTrimming="CharacterEllipsis" />
+                    <TextBox x:Name="TroopXmlOutputBox" Height="180"
                              IsReadOnly="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto"
                              FontFamily="Consolas" />
                     <Grid Margin="0,8,0,0">
@@ -942,10 +1122,10 @@
                             </StackPanel>
                         </Button>
                         <Button x:Name="ExportTroopXmlButton" Grid.Column="1" Margin="4,0,0,0"
-                                ToolTip="Save equipment roster XML" Click="ExportTroopXml_Click">
+                                ToolTip="Save this troop's loadout and equipped item edits directly to source XML, with backups" Click="ExportTroopXml_Click">
                             <StackPanel Orientation="Horizontal">
                                 <TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xE74E;" Margin="0,0,8,0" VerticalAlignment="Center" />
-                                <TextBlock Text="Export XML" />
+                                <TextBlock Text="Save XML" />
                             </StackPanel>
                         </Button>
                     </Grid>
@@ -962,10 +1142,19 @@
                         </TextBlock.Style>
                     </TextBlock>
                 </StackPanel>
+                </Expander>
             </Border>
             </StackPanel>
+            </ScrollViewer>
+                </Grid>
+            </Border>
+            </Grid>
             </Grid>
 
+            <Button HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="24,24,74,24"
+                    Width="42" Height="38" Padding="0" ToolTip="Export FBX and textures" Click="AssetExport_Click">
+                <TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xE74E;" FontSize="18" />
+            </Button>
             <ToggleButton x:Name="RenderExportToggle" HorizontalAlignment="Right" VerticalAlignment="Bottom"
                           Margin="24" Width="42" Height="38" ToolTip="Export render"
                           Background="#2A281A" BorderBrush="#4A4324" Foreground="#F3EFD9" Cursor="Hand"
@@ -988,7 +1177,7 @@
                 </ToggleButton.Template>
                 <TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xE722;" FontSize="18" />
             </ToggleButton>
-            <Popup x:Name="RenderExportPopup" PlacementTarget="{Binding ElementName=RenderExportToggle}"
+            <Popup x:Name="RenderExportPopup" PlacementTarget="{Binding ElementName=RenderExportToggle}" Closed="RenderExportPopup_Closed"
                    Placement="Top" StaysOpen="False" AllowsTransparency="True"
                    IsOpen="{Binding IsChecked, ElementName=RenderExportToggle, Mode=TwoWay}">
                 <Border Width="300" Margin="0,0,0,8" Background="#F20B1016" BorderBrush="#23303B"
@@ -1016,15 +1205,22 @@
                             </StackPanel>
                         </Grid>
                         <TextBlock Text="Background" Foreground="{StaticResource MutedBrush}" Margin="0,10,0,4" />
-                        <ComboBox x:Name="RenderBackgroundCombo" SelectedIndex="0" IsEditable="False">
+                        <ComboBox x:Name="RenderBackgroundCombo" SelectedIndex="0" IsEditable="False" SelectionChanged="RenderSetting_Changed">
                             <ComboBoxItem Content="Transparent" />
                             <ComboBoxItem Content="Studio" />
                         </ComboBox>
-                        <CheckBox x:Name="RenderGridCheckBox" Content="Grid" Foreground="#F3EFD9" Margin="0,12,0,0" />
+                        <CheckBox x:Name="RenderGridCheckBox" Content="Grid" Foreground="#F3EFD9" Margin="0,12,0,0"
+                                  Checked="RenderSetting_Changed" Unchecked="RenderSetting_Changed" />
                         <Button x:Name="SaveRenderButton" Margin="0,12,0,0" ToolTip="Save render as PNG" Click="ExportRender_Click">
                             <StackPanel Orientation="Horizontal">
                                 <TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xE74E;" Margin="0,0,8,0" VerticalAlignment="Center" />
                                 <TextBlock Text="Export PNG" />
+                            </StackPanel>
+                        </Button>
+                        <Button Margin="0,8,0,0" ToolTip="Export a 360 degree turntable" Click="TurntableExport_Click">
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xE7F4;" Margin="0,0,8,0" VerticalAlignment="Center" />
+                                <TextBlock Text="Turntable export" />
                             </StackPanel>
                         </Button>
                         <TextBlock x:Name="RenderExportStatusText" Foreground="{StaticResource MutedBrush}"
