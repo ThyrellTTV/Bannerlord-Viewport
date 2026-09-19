@@ -13,6 +13,14 @@ Windows desktop toolkit for browsing and rendering Mount & Blade II: Bannerlord 
 
 Meshes now render with PBR materials, studio lighting, faction colours and animated troop loadouts. Meshes beginning with `clo_` are excluded from parsing.
 
+## Credits and licensing
+
+- [TpacTool](https://github.com/szszss/TpacTool) by szszss is directly vendored and adapted for TPAC parsing and texture export under the MIT License. Its copyright and license text are retained in `third_party/TpacTool/LICENSE` and shipped with the application.
+- [Item Position Editor](https://www.nexusmods.com/mountandblade2bannerlord/mods/13041) by sakinolemir inspired the live per-item position/rotation/holster editing workflow. No code, DLL, XML, localization, or other asset from that mod is included; Bannerlord Viewport's implementation was written independently for this desktop application.
+- Helix Toolkit, SharpDX, AssimpNet/Assimp, and lz4net provide rendering, DirectX, FBX, and TPAC compression support under their respective open-source licenses.
+
+See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for exact usage, upstream links, copyrights, and license locations. Bannerlord Viewport is an unofficial community tool and is not affiliated with or endorsed by TaleWorlds Entertainment.
+
 ## Troop browsing
 
 - The troops tab can open one XML file or a folder. Folder loading includes XML files in subfolders and resolves equipment from their owning modules and dependencies.

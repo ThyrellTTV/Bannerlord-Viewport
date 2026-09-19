@@ -1,6 +1,8 @@
-# Bannerlord Viewport v0.1.0 Beta 1
+# Bannerlord Viewport v0.1.0 Beta 2
 
 This first team-testing release expands Bannerlord Viewport into a practical TPAC, troop, crafting, positioning, and export tool.
+
+Beta 2 clarifies source provenance and includes the complete third-party notices and license files in the release package. Application behavior is unchanged from Beta 1.
 
 ## Highlights
 
