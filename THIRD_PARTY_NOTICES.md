@@ -12,6 +12,15 @@ Bannerlord Viewport includes or depends on the following third-party projects. T
 
 TpacTool is an unofficial asset explorer and parser for Mount & Blade II: Bannerlord. Bannerlord Viewport is not an official TpacTool release.
 
+## Bannerlord Weapon Piece Aligner / TAOM crafting editor
+
+- Project: [Bannerlord Weapon Piece Aligner](https://github.com/haterade22/TAOM/tree/bannerlord-1.4.5/tools/BannerlordCraftingTool)
+- Original author: KEYForce
+- Upstream project: [Tales from the Age of Men (TAOM)](https://github.com/haterade22/TAOM)
+- License: MIT
+- Use in this project: Bannerlord Viewport's crafting editor was implemented from and adapted from the upstream tool's code, including its weapon-piece assembly and offset-editing foundation. It has since been integrated with TPAC rendering, troop loadouts, and source XML saving.
+- License text: `third_party/TAOM/LICENSE`, distributed as `Licenses/TAOM.txt`.
+
 ## Item Position Editor
 
 - Project: [Item Position Editor](https://www.nexusmods.com/mountandblade2bannerlord/mods/13041)

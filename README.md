@@ -16,6 +16,7 @@ Meshes now render with PBR materials, studio lighting, faction colours and anima
 ## Credits and licensing
 
 - [TpacTool](https://github.com/szszss/TpacTool) by szszss is directly vendored and adapted for TPAC parsing and texture export under the MIT License. Its copyright and license text are retained in `third_party/TpacTool/LICENSE` and shipped with the application.
+- [Bannerlord Weapon Piece Aligner](https://github.com/haterade22/TAOM/tree/bannerlord-1.4.5/tools/BannerlordCraftingTool), originally built by KEYForce for TAOM, is the basis for Bannerlord Viewport's crafting editor. Its code was adapted and extended with TPAC rendering, troop-loadout integration, and source XML saving under TAOM's MIT License.
 - [Item Position Editor](https://www.nexusmods.com/mountandblade2bannerlord/mods/13041) by sakinolemir inspired the live per-item position/rotation/holster editing workflow. No code, DLL, XML, localization, or other asset from that mod is included; Bannerlord Viewport's implementation was written independently for this desktop application.
 - Helix Toolkit, SharpDX, AssimpNet/Assimp, and lz4net provide rendering, DirectX, FBX, and TPAC compression support under their respective open-source licenses.
 

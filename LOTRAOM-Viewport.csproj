@@ -28,6 +28,7 @@
     <None Remove="third_party\**\*.cs" />
     <ProjectReference Include="third_party\TpacTool\TpacTool.Lib\TpacTool.Lib.csproj" />
     <None Include="third_party\TpacTool\LICENSE" Link="Licenses\TpacTool.txt" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="third_party\TAOM\LICENSE" Link="Licenses\TAOM.txt" CopyToOutputDirectory="PreserveNewest" />
     <None Update="third_party\AssimpNet\LICENSE.txt" Link="Licenses\AssimpNet.txt" CopyToOutputDirectory="PreserveNewest" />
     <None Update="third_party\HelixToolkit\LICENSE" Link="Licenses\HelixToolkit.txt" CopyToOutputDirectory="PreserveNewest" />
     <None Update="third_party\SharpDX\LICENSE" Link="Licenses\SharpDX.txt" CopyToOutputDirectory="PreserveNewest" />
