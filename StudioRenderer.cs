@@ -186,8 +186,10 @@ internal sealed class StudioRenderer : IDisposable
             throw new ArgumentOutOfRangeException(nameof(width), "Use dimensions from 64 to 8192 pixels, up to 32 megapixels.");
         var host = _viewport.RenderHost;
         if (host == null || !host.IsRendering) throw new InvalidOperationException("The viewport is not ready to export.");
-        var oldWidth = (int)host.ActualWidth;
-        var oldHeight = (int)host.ActualHeight;
+        // Helix reports device pixels but Resize accepts DIPs and applies DpiScale again.
+        var dpi = host.DpiScale > 0 ? host.DpiScale : 1f;
+        var oldWidth = (int)Math.Round(host.ActualWidth / dpi);
+        var oldHeight = (int)Math.Round(host.ActualHeight / dpi);
         var background = _viewport.BackgroundColor;
         var fxaa = _viewport.FXAALevel;
         var msaa = _viewport.MSAA;
@@ -201,7 +203,7 @@ internal sealed class StudioRenderer : IDisposable
                 _viewport.MSAA = MSAALevel.Four;
             }
             if (!includeGrid) foreach (var mesh in _gridMeshes) mesh.Visibility = Visibility.Collapsed;
-            host.Resize(width, height);
+            host.Resize((int)Math.Ceiling(width / dpi), (int)Math.Ceiling(height / dpi));
             _viewport.InvalidateRender();
             host.UpdateAndRender();
             var context = _effects.Device!.ImmediateContext;
@@ -212,7 +214,7 @@ internal sealed class StudioRenderer : IDisposable
             // Helix's bitmap helper converts to 24-bit RGB and discards alpha. Read the GPU texture instead.
             using (staging)
             {
-                if (staging.Description.Format != Format.B8G8R8A8_UNorm || staging.Description.Width != width || staging.Description.Height != height)
+                if (staging.Description.Format != Format.B8G8R8A8_UNorm || staging.Description.Width < width || staging.Description.Height < height)
                     throw new InvalidOperationException("The renderer returned an unexpected image format or size.");
                 var data = context.MapSubresource(staging, 0, MapMode.Read, SharpDX.Direct3D11.MapFlags.None);
                 try
