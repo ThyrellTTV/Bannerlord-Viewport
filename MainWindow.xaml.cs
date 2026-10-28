@@ -61,6 +61,9 @@ public partial class MainWindow : Window
     private readonly Dictionary<string, List<MeshAssetNode>> _armourOptions = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<ComboBox, string> _equipmentSearchText = [];
     private readonly Dictionary<string, XElement> _equipmentItems = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, XElement> _craftingItems = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, string> _craftingItemSourcePaths = new(StringComparer.OrdinalIgnoreCase);
+    private bool _craftingItemsSourceLoaded;
     private readonly Dictionary<string, CraftingPieceNode> _equipmentCraftingPieces = new(StringComparer.OrdinalIgnoreCase);
     private readonly ObservableCollection<CraftingPieceNode> _craftingPieces = [];
     private readonly Dictionary<string, HashSet<string>> _craftingTemplatePieceIds = new(StringComparer.OrdinalIgnoreCase);
@@ -372,6 +375,13 @@ public partial class MainWindow : Window
                 loaded.Add("crafting templates");
             }
 
+            if (!string.IsNullOrWhiteSpace(settings.CraftingItemsPath) &&
+                (File.Exists(settings.CraftingItemsPath) || Directory.Exists(settings.CraftingItemsPath)))
+            {
+                LoadCraftingItems(settings.CraftingItemsPath);
+                loaded.Add("crafted items");
+            }
+
             if (!string.IsNullOrWhiteSpace(settings.TroopsPath) &&
                 (File.Exists(settings.TroopsPath) || Directory.Exists(settings.TroopsPath)))
             {
@@ -409,6 +419,7 @@ public partial class MainWindow : Window
             {
                 SaveSettings = saveSettings,
                 AssetPackagesPath = GetPersistablePath(AssetPathBox.Text),
+                CraftingItemsPath = GetPersistablePath(CraftingItemsPathBox.Text),
                 CraftingPiecesPath = GetPersistablePath(CraftingPiecesPathBox.Text),
                 CraftingTemplatesPath = GetPersistablePath(CraftingTemplatesPathBox.Text),
                 TroopsPath = saveSettings ? GetPersistablePath(TroopXmlPathBox.Text) : null,
@@ -416,6 +427,7 @@ public partial class MainWindow : Window
                 BatchRender = saveSettings ? _batchRenderOptions : null,
                 Turntable = saveSettings ? _turntableOptions : null,
                 BatchTurntable = saveSettings ? _batchTurntableOptions : null,
+                BatchCraftingTurntable = saveSettings ? _batchCraftingTurntableOptions : null,
                 AssetExport = saveSettings ? _assetExportOptions : null,
                 ItemPositions = saveSettings ? new Dictionary<string, ItemPositionTuning>(_itemPositions, StringComparer.OrdinalIgnoreCase) : null
             };
@@ -845,6 +857,75 @@ public partial class MainWindow : Window
         {
             LoadCraftingPieces(dialog.FileName);
             SaveSettingsIfEnabled();
+        }
+    }
+
+    private void ChooseCraftingItems_Click(object sender, RoutedEventArgs e)
+    {
+        var dialog = new OpenFileDialog
+        {
+            Title = "Select Bannerlord crafted item XML",
+            Filter = "XML files (*.xml)|*.xml|All files (*.*)|*.*",
+            Multiselect = false
+        };
+        if (dialog.ShowDialog(this) != true) return;
+        LoadCraftingItems(dialog.FileName);
+        SaveSettingsIfEnabled();
+    }
+
+    private void ChooseCraftingItemsFolder_Click(object sender, RoutedEventArgs e)
+    {
+        var dialog = new OpenFolderDialog { Title = "Select a crafted item XML folder", Multiselect = false };
+        if (dialog.ShowDialog(this) != true) return;
+        LoadCraftingItems(dialog.FolderName);
+        SaveSettingsIfEnabled();
+    }
+
+    private void LoadCraftingItems(string path)
+    {
+        CraftingItemsPathBox.Text = path;
+        _craftingItemsSourceLoaded = true;
+        _craftingItems.Clear();
+        _craftingItemSourcePaths.Clear();
+        CraftingItemsSummaryText.ToolTip = null;
+        try
+        {
+            var folder = Directory.Exists(path);
+            var files = folder
+                ? Directory.EnumerateFiles(path, "*.xml", SearchOption.AllDirectories)
+                    .OrderBy(file => file, StringComparer.OrdinalIgnoreCase).ToArray()
+                : new[] { path };
+            var failures = new List<string>();
+            var duplicates = 0;
+            foreach (var file in files)
+            {
+                XDocument document;
+                try { document = XDocument.Load(file); }
+                catch (Exception ex) when (folder && ex is System.Xml.XmlException or IOException or UnauthorizedAccessException)
+                {
+                    failures.Add($"{Path.GetRelativePath(path, file)}: {ex.Message}");
+                    continue;
+                }
+                foreach (var item in (document.Root?.DescendantsAndSelf() ?? [])
+                    .Where(element => element.Name.LocalName.Equals("CraftedItem", StringComparison.OrdinalIgnoreCase)))
+                {
+                    var id = GetAttributeValue(item, "id");
+                    if (string.IsNullOrWhiteSpace(id)) continue;
+                    if (!_craftingItems.TryAdd(id, item)) { duplicates++; continue; }
+                    _craftingItemSourcePaths[id] = Path.GetFullPath(file);
+                }
+            }
+            CraftingItemsSummaryText.Text = $"Loaded {_craftingItems.Count:N0} crafted item(s) from {files.Length - failures.Count:N0} XML file(s).";
+            if (duplicates > 0) CraftingItemsSummaryText.Text += $" {duplicates:N0} duplicate ID(s) skipped.";
+            if (failures.Count > 0)
+            {
+                CraftingItemsSummaryText.Text += $" {failures.Count:N0} unreadable file(s) skipped.";
+                CraftingItemsSummaryText.ToolTip = string.Join(Environment.NewLine, failures);
+            }
+        }
+        catch (Exception ex)
+        {
+            CraftingItemsSummaryText.Text = $"Could not load crafted items: {ex.Message}";
         }
     }
 
@@ -1406,6 +1487,9 @@ public partial class MainWindow : Window
             {
                 continue;
             }
+
+            // Empty meshes are authored "None" pieces; their offsets still participate in assembly.
+            if (string.IsNullOrWhiteSpace(piece.MeshName)) continue;
 
             try
             {
@@ -2233,16 +2317,17 @@ public partial class MainWindow : Window
         foreach (var reference in item.Descendants().Where(element => element.Name.LocalName == "Piece"))
         {
             var id = GetAttributeValue(reference, "id") ?? string.Empty;
-            if (!_equipmentCraftingPieces.TryGetValue(id, out var definition))
+            var definition = _craftingPieces.FirstOrDefault(piece => piece.Id.Equals(id, StringComparison.OrdinalIgnoreCase)) ??
+                _equipmentCraftingPieces.GetValueOrDefault(id);
+            if (definition == null)
             {
-                throw new InvalidOperationException($"Crafting piece '{id}' was not found in module XML.");
+                throw new InvalidOperationException($"Crafting piece '{id}' was not found in the loaded crafting data.");
             }
-
-            definition = _craftingPieces.FirstOrDefault(piece => piece.Id == id && piece.IsDirty) ?? definition;
             var offsets = _itemPositions.GetValueOrDefault(GetAttributeValue(item, "id") ?? "")?.Pieces?.GetValueOrDefault(id);
 
             var piece = new CraftingPieceNode
             {
+                Id = id,
                 MeshName = definition.MeshName,
                 Length = definition.Length,
                 DistanceToNextPiece = definition.DistanceToNextPiece,
@@ -2297,8 +2382,10 @@ public partial class MainWindow : Window
                 // Keep a bare blade when its author supplied no scabbard mesh.
                 else if (hiddenTypes.Contains(type) && type != "Blade") continue;
             }
+            // Keep nonvisual placeholders in the pivot calculation without requesting an empty mesh.
+            if (string.IsNullOrWhiteSpace(meshName)) continue;
             var asset = FindEquipmentMesh(meshName)
-                ?? throw new InvalidOperationException($"Mesh '{meshName}' is not in the loaded TPAC assets.");
+                ?? throw new InvalidOperationException($"Mesh '{meshName}' for crafting piece '{piece.Id}' is not in the loaded TPAC assets.");
             var model = LoadMeshModel(asset, out _, MeshRenderMode.CraftingPiece, meshLength);
             var transform = new Transform3DGroup();
             transform.Children.Add(new ScaleTransform3D(meshScale, meshScale, meshScale));
@@ -3646,6 +3733,7 @@ public sealed class AppSettings
 {
     public bool SaveSettings { get; init; }
     public string? AssetPackagesPath { get; init; }
+    public string? CraftingItemsPath { get; init; }
     public string? CraftingPiecesPath { get; init; }
     public string? CraftingTemplatesPath { get; init; }
     public string? TroopsPath { get; init; }
@@ -3653,6 +3741,7 @@ public sealed class AppSettings
     public BatchRenderOptions? BatchRender { get; init; }
     public TurntableOptions? Turntable { get; init; }
     public TurntableOptions? BatchTurntable { get; init; }
+    public TurntableOptions? BatchCraftingTurntable { get; init; }
     public AssetExportOptions? AssetExport { get; init; }
     public Dictionary<string, ItemPositionTuning>? ItemPositions { get; init; }
 }

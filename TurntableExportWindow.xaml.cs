@@ -12,6 +12,9 @@ public partial class TurntableExportWindow : Window
 {
     private readonly Func<TurntableOptions, IProgress<TurntableProgress>, CancellationToken, Task<TurntableResult>> _render;
     private readonly bool _batch;
+    private readonly bool _filteredScope;
+    private readonly bool _organise;
+    private readonly string _batchEntryLabel;
     private CancellationTokenSource? _cancellation;
     private bool _updating = true;
     private bool _running;
@@ -21,20 +24,32 @@ public partial class TurntableExportWindow : Window
     internal TurntableExportWindow(MainWindow owner, TurntableOptions options,
         Func<TurntableOptions, IProgress<TurntableProgress>, CancellationToken, Task<TurntableResult>> render,
         int? allCount = null, int filteredCount = 0)
+        : this(owner, options, render, allCount, filteredCount, "Meshes", true, true)
+    {
+    }
+
+    internal TurntableExportWindow(MainWindow owner, TurntableOptions options,
+        Func<TurntableOptions, IProgress<TurntableProgress>, CancellationToken, Task<TurntableResult>> render,
+        int? allCount, int filteredCount, string scopeLabel, bool filteredScope, bool organise)
     {
         Resources.MergedDictionaries.Add(owner.Resources);
         InitializeComponent();
         Owner = owner;
         _render = render;
         _batch = allCount != null;
+        _filteredScope = filteredScope;
+        _organise = organise;
+        _batchEntryLabel = scopeLabel.Equals("Meshes", StringComparison.OrdinalIgnoreCase) ? "Mesh" : "Weapon";
         if (_batch)
         {
             Title = HeaderText.Text = "Batch Turntables";
             BatchScopePanel.Visibility = Visibility.Visible;
-            ScopeCombo.Items.Add($"All meshes ({allCount:N0})");
-            ScopeCombo.Items.Add($"Current search ({filteredCount:N0})");
-            ScopeCombo.SelectedIndex = options.Filtered ? 1 : 0;
-            OrganiseCheckBox.IsChecked = options.OrganiseByPackage;
+            BatchScopeLabel.Text = scopeLabel;
+            ScopeCombo.Items.Add($"All {scopeLabel.ToLowerInvariant()} ({allCount:N0})");
+            if (filteredScope) ScopeCombo.Items.Add($"Current search ({filteredCount:N0})");
+            ScopeCombo.SelectedIndex = filteredScope && options.Filtered ? 1 : 0;
+            OrganiseCheckBox.Visibility = organise ? Visibility.Visible : Visibility.Collapsed;
+            OrganiseCheckBox.IsChecked = organise && options.OrganiseByPackage;
             AutoFrameCheckBox.Visibility = Visibility.Collapsed;
         }
         FormatCombo.SelectedIndex = options.Video ? 1 : 0;
@@ -102,8 +117,8 @@ public partial class TurntableExportWindow : Window
             Seconds = Number(SecondsBox), FramesPerSecond = Number(FpsBox), Transparent = BackgroundCombo.SelectedIndex == 0,
             IncludeGrid = GridCheckBox.IsChecked == true, Clockwise = DirectionCombo.SelectedIndex == 0,
             AutoFrame = AutoFrameCheckBox.IsChecked == true,
-            Filtered = _batch && ScopeCombo.SelectedIndex == 1,
-            OrganiseByPackage = OrganiseCheckBox.IsChecked == true,
+            Filtered = _batch && _filteredScope && ScopeCombo.SelectedIndex == 1,
+            OrganiseByPackage = _batch && _organise && OrganiseCheckBox.IsChecked == true,
             StartAngle = double.TryParse(StartAngleBox.Text.Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out var angle) ? angle : double.NaN,
             Elevation = double.TryParse(ElevationBox.Text.Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out var elevation) ? elevation : double.NaN
         };
@@ -143,7 +158,7 @@ public partial class TurntableExportWindow : Window
                 ExportProgressBar.Maximum = Math.Max(1, value.Total);
                 ExportProgressBar.Value = value.Completed;
                 ProgressText.Text = value.MeshTotal > 0
-                    ? $"Mesh {value.MeshIndex:N0} / {value.MeshTotal:N0} - {value.Saved:N0} saved, {value.Skipped:N0} skipped, {value.Failed:N0} failed"
+                    ? $"{_batchEntryLabel} {value.MeshIndex:N0} / {value.MeshTotal:N0} - {value.Saved:N0} saved, {value.Skipped:N0} skipped, {value.Failed:N0} failed"
                     : $"{value.Completed:N0} / {value.Total:N0} frames";
                 CurrentMeshText.Text = value.MeshTotal > 0 ? $"{value.Mesh} - {value.Completed:N0} / {value.Total:N0} frames" : "";
                 StatusText.Text = value.Completed == value.Total && options.Video ? "Finalising video..." : "";

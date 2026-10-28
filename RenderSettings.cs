@@ -62,6 +62,11 @@ public partial class MainWindow
             try { batchTurntable.Validate(); _batchTurntableOptions = batchTurntable; }
             catch (ArgumentException) { }
         }
+        if (settings.BatchCraftingTurntable is { } batchCraftingTurntable)
+        {
+            try { batchCraftingTurntable.Validate(); _batchCraftingTurntableOptions = batchCraftingTurntable; }
+            catch (ArgumentException) { }
+        }
         if (settings.AssetExport is { } assetExport)
         {
             try { assetExport.Validate(); _assetExportOptions = assetExport; }

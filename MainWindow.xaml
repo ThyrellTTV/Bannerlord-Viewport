@@ -620,8 +620,33 @@
                     </TabItem>
 
                     <TabItem x:Name="CraftingTab" Header="Crafting">
-                        <ScrollViewer Margin="0,12,0,0" VerticalScrollBarVisibility="Auto">
+                        <ScrollViewer x:Name="CraftingScrollViewer" Margin="0,12,0,0" VerticalScrollBarVisibility="Auto">
                             <StackPanel Margin="0,0,12,0">
+                                <Grid Margin="0,0,0,6">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBox x:Name="CraftingItemsPathBox"
+                                             IsReadOnly="True"
+                                             Text="Optional crafted item XML/folder..." />
+                                    <Button Grid.Column="1"
+                                            Margin="8,0,0,0"
+                                            Click="ChooseCraftingItems_Click"
+                                            Content="Items" />
+                                    <Button Grid.Column="2" Width="36" Margin="6,0,0,0" Padding="0"
+                                            ToolTip="Choose crafted item XML folder"
+                                            Click="ChooseCraftingItemsFolder_Click">
+                                        <TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xE8B7;" />
+                                    </Button>
+                                </Grid>
+                                <TextBlock x:Name="CraftingItemsSummaryText"
+                                           Margin="0,0,0,10"
+                                           Foreground="{StaticResource MutedBrush}"
+                                           FontSize="11"
+                                           Text="No crafted items loaded." />
+
                                 <Grid Margin="0,0,0,10">
                                     <Grid.ColumnDefinitions>
                                         <ColumnDefinition Width="*" />
@@ -654,6 +679,28 @@
                                            Foreground="{StaticResource MutedBrush}"
                                            FontSize="12"
                                            Text="No crafting pieces loaded." />
+
+                                <Grid Margin="0,10,0,0">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition />
+                                        <ColumnDefinition Width="8" />
+                                        <ColumnDefinition />
+                                    </Grid.ColumnDefinitions>
+                                    <Button Click="CraftingTurntableExport_Click" Padding="5,6"
+                                            ToolTip="Export the current custom weapon as a turntable">
+                                        <StackPanel Orientation="Horizontal">
+                                            <TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xE7AD;" Margin="0,0,6,0" VerticalAlignment="Center" />
+                                            <TextBlock Text="Turntable" FontSize="12" />
+                                        </StackPanel>
+                                    </Button>
+                                    <Button x:Name="BatchCraftedTurntableButton" Grid.Column="2" Padding="5,6" Click="BatchCraftedTurntableExport_Click"
+                                            ToolTip="Batch export turntables from crafted item definitions">
+                                        <StackPanel Orientation="Horizontal">
+                                            <TextBlock FontFamily="Segoe MDL2 Assets" Text="&#xE7AD;" Margin="0,0,6,0" VerticalAlignment="Center" />
+                                            <TextBlock Text="Batch Turntables" FontSize="12" />
+                                        </StackPanel>
+                                    </Button>
+                                </Grid>
 
                                 <TextBlock Text="WEAPON TEMPLATE"
                                            Margin="0,14,0,0"

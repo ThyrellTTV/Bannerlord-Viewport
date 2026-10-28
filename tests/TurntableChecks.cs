@@ -49,18 +49,24 @@ internal static class TurntableChecks
                 ((MeshAssetNode[])Call("GetBatchRenderAssets", true)!).Length > 0, "Filtered scope ignored search.");
             search.Clear(); Pump();
             var stored = options with { Filtered = true, Clockwise = false, Elevation = 25, StartAngle = 45.5 };
+            var craftedStored = stored with { Name = "crafted-turntables", Filtered = false, OrganiseByPackage = false };
             Assert(JsonSerializer.Deserialize<TurntableOptions>(JsonSerializer.Serialize(stored)) == stored, "Settings JSON roundtrip failed.");
-            Call("RestoreRenderSettings", new AppSettings { BatchTurntable = stored });
+            Call("RestoreRenderSettings", new AppSettings { BatchTurntable = stored, BatchCraftingTurntable = craftedStored });
             Assert((TurntableOptions)Field("_batchTurntableOptions") == stored, "Batch settings not restored.");
+            Assert((TurntableOptions)Field("_batchCraftingTurntableOptions") == craftedStored, "Crafted batch settings not restored.");
             // Avoid expensive game-path reloads when checking only option persistence.
             ((TextBox)window.FindName("AssetPathBox")).Clear();
             var save = (CheckBox)window.FindName("SaveSettingsCheckBox"); save.IsChecked = true; Call("SaveSettings");
             using (var saved = JsonDocument.Parse(File.ReadAllText(settings)))
                 Assert(saved.RootElement.GetProperty("BatchTurntable").GetProperty("Elevation").GetDouble() == 25 &&
                     saved.RootElement.GetProperty("BatchTurntable").GetProperty("StartAngle").GetDouble() == 45.5, "Enabled settings did not save batch options.");
+            using (var saved = JsonDocument.Parse(File.ReadAllText(settings)))
+                Assert(saved.RootElement.GetProperty("BatchCraftingTurntable").GetProperty("Name").GetString() == "crafted-turntables",
+                    "Enabled settings did not save crafted batch options.");
             save.IsChecked = false; Call("SaveSettings");
             using (var saved = JsonDocument.Parse(File.ReadAllText(settings)))
-                Assert(saved.RootElement.GetProperty("BatchTurntable").ValueKind == JsonValueKind.Null, "Disabled settings persisted batch options.");
+                Assert(saved.RootElement.GetProperty("BatchTurntable").ValueKind == JsonValueKind.Null &&
+                    saved.RootElement.GetProperty("BatchCraftingTurntable").ValueKind == JsonValueKind.Null, "Disabled settings persisted batch options.");
             var progressType = typeof(MainWindow).Assembly.GetType("LOTRAOM_Viewport.TurntableProgress")!;
             object Progress(Action<object> action) => Activator.CreateInstance(typeof(ProbeProgress<>).MakeGenericType(progressType), action)!;
             object Run(MeshAssetNode[] selected, TurntableOptions opts, CancellationToken token, Action<object>? report = null)
@@ -133,6 +139,46 @@ internal static class TurntableChecks
                 Assert(report.RootElement.GetProperty("Cancelled").GetBoolean() && report.RootElement.GetProperty("Meshes")[0].GetProperty("Status").GetString() == "Cancelled", "Cancellation report missing.");
             }
             Restored();
+            var craftedSource = Path.Combine(root, "crafted-source");
+            Directory.CreateDirectory(craftedSource);
+            File.WriteAllText(Path.Combine(craftedSource, "items.xml"), """
+                <CraftedItems>
+                  <CraftedItem id="test_crafted_weapon" name="Test weapon" crafting_template="OneHandedSword">
+                    <Pieces>
+                      <Piece id="test_handle" Type="Handle" scale_factor="100" />
+                      <Piece id="test_none_pommel" Type="Pommel" />
+                    </Pieces>
+                  </CraftedItem>
+                </CraftedItems>
+                """);
+            File.WriteAllText(Path.Combine(craftedSource, "broken.xml"), "<CraftedItems>");
+            var testPiece = new CraftingPieceNode
+            {
+                Id = "test_handle", PieceType = "Handle", MeshName = shield.DisplayName,
+                Length = 1, DistanceToNextPiece = .5f, DistanceToPreviousPiece = .5f
+            };
+            Field("_craftingPieces").GetType().GetMethod("Add")!.Invoke(Field("_craftingPieces"), [testPiece]);
+            Field("_craftingPieces").GetType().GetMethod("Add")!.Invoke(Field("_craftingPieces"),
+                [new CraftingPieceNode { Id = "test_none_pommel", PieceType = "Pommel", MeshName = "" }]);
+            Call("LoadCraftingItems", craftedSource);
+            var craftedItems = Call("GetBatchCraftedWeapons")!;
+            Assert(((Array)craftedItems).Length == 1 && ((TextBlock)window.FindName("CraftingItemsSummaryText")).Text.Contains("1 crafted item") &&
+                ((TextBlock)window.FindName("CraftingItemsSummaryText")).Text.Contains("1 unreadable"), "Crafted item folder loading/reporting failed.");
+            typeof(MainWindow).GetField("_craftingHandle", Private)!.SetValue(window, testPiece);
+            typeof(MainWindow).GetField("_previewWorkspace", Private)!.SetValue(window, 2);
+            Assert((string)Call("CurrentTurntableName")! == "crafted_test_handle", "Custom crafting turntable name did not use selected pieces.");
+            var craftedOptions = options with { Name = "crafted-checks", Seconds = 1, FramesPerSecond = 2, OrganiseByPackage = false };
+            var craftedTask = (Task)Call("RunBatchCraftedTurntableExportAsync", craftedItems, craftedOptions,
+                Progress(_ => { }), CancellationToken.None)!;
+            while (!craftedTask.IsCompleted) Pump(); craftedTask.GetAwaiter().GetResult();
+            var craftedResult = craftedTask.GetType().GetProperty("Result")!.GetValue(craftedTask)!;
+            Assert(Value<int>(craftedResult, "Saved") == 1 && Value<int>(craftedResult, "Failed") == 0 &&
+                Directory.GetFiles(Path.Combine(root, "crafted-checks", "test_crafted_weapon"), "*.png").Length == 2,
+                "Crafted weapon batch did not render its piece build.");
+            using (var report = JsonDocument.Parse(File.ReadAllText(Value<string>(craftedResult, "ReportPath"))))
+                Assert(report.RootElement.GetProperty("Items")[0].GetProperty("Item").GetString() == "test_crafted_weapon",
+                    "Crafted turntable report is missing its item ID.");
+            Restored();
             var pngOptions = new BatchRenderOptions { OutputDirectory = Path.Combine(root, "png"), Width = 128, Height = 128,
                 Transparent = true, OrganiseByPackage = false, Overwrite = true };
             var pngProgressType = typeof(MainWindow).Assembly.GetType("LOTRAOM_Viewport.BatchRenderProgress")!;
@@ -196,6 +242,18 @@ internal static class TurntableChecks
             ((ComboBox)dialog.FindName("FormatCombo")).SelectedIndex = 1; Pump();
             Assert(((ComboBox)dialog.FindName("BackgroundCombo")).SelectedIndex == 1 && !((ComboBox)dialog.FindName("BackgroundCombo")).IsEnabled, "MP4 alpha not disabled.");
             Capture(dialog, Path.Combine(output, "batch-video-dialog.png")); dialog.Close();
+            var craftedDialog = (TurntableExportWindow)Activator.CreateInstance(typeof(TurntableExportWindow), Private, null,
+                [window, craftedOptions, null, 1, 0, "Crafted weapons", false, false], null)!;
+            craftedDialog.Show(); Pump();
+            Assert(((TextBlock)craftedDialog.FindName("BatchScopeLabel")).Text == "Crafted weapons" &&
+                ((ComboBox)craftedDialog.FindName("ScopeCombo")).Items.Count == 1 &&
+                ((FrameworkElement)craftedDialog.FindName("OrganiseCheckBox")).Visibility == Visibility.Collapsed,
+                "Crafted batch scope UI is incorrect.");
+            Capture(craftedDialog, Path.Combine(output, "crafted-batch-dialog.png")); craftedDialog.Close();
+            ((TabItem)window.FindName("CraftingTab")).IsSelected = true; Pump();
+            Capture(window, Path.Combine(output, "crafting-turntables.png"));
+            ((ScrollViewer)window.FindName("CraftingScrollViewer")).ScrollToEnd(); Pump();
+            Capture(window, Path.Combine(output, "crafting-turntables-bottom.png"));
             Capture(window, Path.Combine(output, "assets-toolbar.png"));
             if (args.Length > 1)
             {
@@ -205,7 +263,7 @@ internal static class TurntableChecks
                 Assert(videos.Length == 2 && videos.All(path => new FileInfo(path).Length > 500), "MP4 files missing.");
                 Restored(); Console.WriteLine("Two real MP4 mesh exports: passed.");
             }
-            Console.WriteLine("Single/batch start angles, half-turn pixel equivalence, fractional angle UI and persistence, validation, plain naming, duplicate protection, real mesh PNG batch, changing orbit pixels, reports, cancellation and scene/camera restoration: passed.");
+            Console.WriteLine("Single/mesh/crafted batch turntables, crafted XML folders and reports, custom-build naming, start angles, persistence, validation, plain naming, duplicate protection, changing orbit pixels, cancellation and scene/camera restoration: passed.");
         }
         finally
         {

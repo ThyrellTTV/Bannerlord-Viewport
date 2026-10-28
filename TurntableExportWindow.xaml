@@ -13,7 +13,7 @@
         <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
             <StackPanel x:Name="SettingsPanel" Margin="0,0,12,0">
                 <StackPanel x:Name="BatchScopePanel" Visibility="Collapsed" Margin="0,0,0,12">
-                    <TextBlock Text="Meshes" Foreground="{StaticResource MutedBrush}" Margin="0,0,0,4" />
+                    <TextBlock x:Name="BatchScopeLabel" Text="Meshes" Foreground="{StaticResource MutedBrush}" Margin="0,0,0,4" />
                     <ComboBox x:Name="ScopeCombo" IsEditable="False" />
                     <CheckBox x:Name="OrganiseCheckBox" Content="Module / package folders" Foreground="#D8D4C1" Margin="0,10,0,0" />
                 </StackPanel>

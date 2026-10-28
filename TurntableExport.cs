@@ -13,6 +13,7 @@ public partial class MainWindow
 {
     private TurntableOptions? _turntableOptions;
     private TurntableOptions? _batchTurntableOptions;
+    private TurntableOptions? _batchCraftingTurntableOptions;
     private bool _turntableRunning;
 
     private void TurntableExport_Click(object sender, RoutedEventArgs e)
@@ -24,9 +25,10 @@ public partial class MainWindow
             return;
         }
         RenderExportToggle.IsChecked = false;
+        var name = CurrentTurntableName();
         _turntableOptions ??= new() { OutputDirectory = Path.Combine(SettingsDirectory, "Renders"),
-            Name = SafeBatchName(SelectedAssetTitle.Text), FfmpegPath = FindFfmpeg() };
-        _turntableOptions = _turntableOptions with { Name = SafeBatchName(SelectedAssetTitle.Text) };
+            Name = name, FfmpegPath = FindFfmpeg() };
+        _turntableOptions = _turntableOptions with { Name = name };
         var dialog = new TurntableExportWindow(this, _turntableOptions, async (options, progress, cancellation) =>
         {
             _turntableOptions = options;
@@ -40,6 +42,21 @@ public partial class MainWindow
             _turntableOptions = edited;
             SaveSettingsIfEnabled();
         }
+    }
+
+    private void CraftingTurntableExport_Click(object sender, RoutedEventArgs e)
+    {
+        CommitCraftingOffsetBoxes();
+        RenderCraftingWeaponPreview();
+        TurntableExport_Click(sender, e);
+    }
+
+    private string CurrentTurntableName()
+    {
+        if (_previewWorkspace != 2) return SafeBatchName(SelectedAssetTitle.Text);
+        var pieces = new[] { _craftingBlade, _craftingGuard, _craftingHandle, _craftingPommel }
+            .Where(piece => piece != null).Select(piece => piece!.Id).ToArray();
+        return SafeBatchName(pieces.Length == 0 ? "crafted_weapon" : "crafted_" + string.Join("_", pieces));
     }
 
     private static string FindFfmpeg()
