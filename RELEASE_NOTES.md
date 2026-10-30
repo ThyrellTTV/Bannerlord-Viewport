@@ -1,31 +1,33 @@
-# Bannerlord Viewport v0.1.0 Beta 2
+# Bannerlord Viewport v0.1.0 Beta 3
 
-This first team-testing release expands Bannerlord Viewport into a practical TPAC, troop, crafting, positioning, and export tool.
+This prerelease adds turntable exports for crafted weapons and fixes export failures on scaled displays and weapons with nonvisual crafting pieces.
 
-Beta 2 clarifies source provenance and includes the complete third-party notices and license files in the release package. Application behavior is unchanged from Beta 1.
+## New Since Beta 2
 
-## Highlights
+- Export the current custom weapon build directly from the Crafting tab as an MP4 video or PNG sequence.
+- Load a crafted-item XML file or folder and batch export assembled weapons using their piece references, scales, and offsets.
+- Keep separate crafted-weapon batch settings when **Save settings** is enabled. Existing outputs are skipped, and `batch-crafted-turntables.json` records each item's result.
+- Find the crafting export buttons immediately below the source paths, above Weapon Template and Pieces.
 
-- Browse TPAC assets with textured PBR materials, faction colour blending, studio lighting, search, and batch rendering.
-- Load individual troop XML files or folders, preview complete custom loadouts, play Bannerlord animations, and edit held or holstered equipment positions directly on the troop.
-- Edit crafting-piece selections and offsets, copy generated XML, or safely save changes back to source XML with timestamped backups.
-- Export selected assets and troop loadouts as FBX with referenced PNG/DDS textures.
-- Export transparent or studio PNG renders, configurable 360-degree turntables, and batch turntables. MP4 export supports FFmpeg when supplied separately.
-- Save render and editor settings when **Save settings** is enabled.
+## Fixes And Credits
+
+- Correct PNG and turntable capture sizing on scaled Windows displays, including the viewport resize restoration that could eventually fail with `E_INVALIDARG`. Thanks to yotthani for the contributed fix and report.
+- Treat intentionally empty crafting meshes, such as the native "None" polearm pommel, as nonvisual pieces instead of failing the entire weapon export. Their offsets remain part of assembly calculations.
+- Include the crafting piece ID in errors for genuinely missing weapon meshes.
+- Credit KEYForce's Bannerlord Weapon Piece Aligner as the basis for the crafting editor and include TAOM's MIT license in the release package.
 
 ## Testing Focus
 
 Please pay particular attention to:
 
-- TPAC packages or materials that fail to parse or render correctly.
-- Troop loadouts with unusual weapon combinations, holsters, shields, bows, polearms, or crafted weapons.
-- Source XML save results and generated backups.
-- FBX and texture exports in your preferred 3D application.
-- Batch render and turntable naming, framing, cancellation, and performance on large asset sets.
+- Crafted weapon assembly, including custom scales, offsets, and empty/default pieces.
+- Single and batch turntable exports, skipped outputs, failure reports, cancellation, and performance on large item sets.
+- PNG and turntable exports at 125%, 150%, and 175% Windows display scaling. The contributor verified the DPI fix at 150%; other scaling factors still need real-display testing.
 
 ## Requirements
 
 - Windows x64.
+- Extract the complete ZIP and run `Bannerlord Viewport.exe`. The .NET runtime is included.
 - A local Mount & Blade II: Bannerlord installation or extracted module data to browse.
 - FFmpeg is optional and only required for MP4 turntable export. PNG sequences work without it.
 
