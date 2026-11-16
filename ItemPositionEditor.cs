@@ -35,9 +35,11 @@ public sealed record ItemPositionTuning
     public ItemAttachmentTransform? Held { get; init; }
     public ItemAttachmentTransform? Holstered { get; init; }
     public Dictionary<string, ItemCraftingOffsets>? Pieces { get; init; }
+    public string? Grip { get; init; }
     internal void Validate()
     {
         Held?.Validate(); Holstered?.Validate();
+        if (Grip is not (null or "shield" or "hand_shield")) throw new ArgumentException("Shield grip must be shield or hand_shield.");
         if (Pieces == null) return;
         foreach (var (id, offsets) in Pieces)
         {
@@ -104,7 +106,7 @@ public partial class MainWindow
         var previous = ActivePositionItem;
         var items = new List<PositionItem>();
         if (_previewWorkspace == 1 && WorkspaceTabs.SelectedIndex == 1)
-            foreach (var slot in new[] { "Item0", "Item1" })
+            foreach (var slot in WeaponSlots)
                 if (_troopPreviewLoadout.TryGetValue(slot, out var reference))
                 {
                     try
@@ -128,7 +130,7 @@ public partial class MainWindow
 
     private bool PositionItemIsCarried(PositionItem item)
     {
-        var state = item.Slot == "Item0" ? Item0StateCombo : Item1StateCombo;
+        var state = StateComboFor(item.Slot);
         return IsSlotSheathed(item.Slot) || ((ComboBoxItem)state.Items[0]).Content?.ToString() == "Carried";
     }
 
@@ -152,7 +154,7 @@ public partial class MainWindow
         if (_updatingItemPositions || _itemPositionBoxes.Count != 6) return;
         if (ActivePositionItem is { } selected)
         {
-            var state = selected.Slot == "Item0" ? Item0StateCombo : Item1StateCombo;
+            var state = StateComboFor(selected.Slot);
             if (sender == ItemPositionModeCombo && state.IsEnabled)
                 state.SelectedIndex = ItemPositionModeCombo.SelectedIndex;
             if (sender == ItemPositionItemCombo)
@@ -176,12 +178,13 @@ public partial class MainWindow
         for (var i = 0; i < 6; i++) _itemPositionBoxes[i].Text = values[i].ToString("0.######", CultureInfo.InvariantCulture);
         var crafted = item.Name.LocalName == "CraftedItem";
         var ammunition = IsAmmunition(WeaponCategory(item));
-        var state = selected.Slot == "Item0" ? Item0StateCombo : Item1StateCombo;
+        var state = StateComboFor(selected.Slot);
         ((ComboBoxItem)ItemPositionModeCombo.Items[0]).IsEnabled = !ammunition && ((ComboBoxItem)state.Items[0]).Content?.ToString() != "Carried";
         ItemPositionFields.IsEnabled = holstered || (!crafted && !ammunition && item.Descendants("Weapon").Any());
         ItemPositionFields.Visibility = crafted && !holstered ? Visibility.Collapsed : Visibility.Visible;
         ItemPositionAttachmentSteps.Visibility = crafted && !holstered ? Visibility.Collapsed : Visibility.Visible;
         ItemPositionCraftingButton.Visibility = crafted ? Visibility.Visible : Visibility.Collapsed;
+        RefreshGripControls(item, selected.Id, holstered);
         ItemPositionStatusText.Text = "";
         if (ammunition && !holstered) ItemPositionStatusText.Text = "Ammunition uses a carried holster frame.";
         ItemPositionRotationLabel.Text = holstered ? "Holster rotation adjustment (degrees)" : "Rotation (degrees)";
@@ -415,6 +418,7 @@ public partial class MainWindow
             weapon.SetAttributeValue("rotation", ItemVector(held.Rotation));
             if (!fullItem) item.Add(new XElement("ItemComponent", weapon));
         }
+        if (tuning.Grip is { } grip && source.Name.LocalName != "CraftedItem") ApplyGripToItem(item, grip);
         XDocument? holsterDocument = null, templateDocument = null;
         if (tuning.Holstered is { } holstered)
         {

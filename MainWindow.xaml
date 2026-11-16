@@ -485,6 +485,8 @@
                                         <RowDefinition Height="Auto" />
                                         <RowDefinition Height="Auto" />
                                         <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
                                     </Grid.RowDefinitions>
                                     <TextBlock Text="Helmet" Foreground="{StaticResource MutedBrush}" Margin="0,6" />
                                     <ComboBox x:Name="HelmetCombo" Grid.Column="1" Margin="0,2" DisplayMemberPath="DisplayName" />
@@ -500,6 +502,10 @@
                                     <ComboBox x:Name="Item0Combo" Grid.Row="5" Grid.Column="1" Margin="0,2" DisplayMemberPath="DisplayName" />
                                     <TextBlock Grid.Row="6" Text="Item1" Foreground="{StaticResource MutedBrush}" Margin="0,6" />
                                     <ComboBox x:Name="Item1Combo" Grid.Row="6" Grid.Column="1" Margin="0,2" DisplayMemberPath="DisplayName" />
+                                    <TextBlock Grid.Row="7" Text="Item2" Foreground="{StaticResource MutedBrush}" Margin="0,6" />
+                                    <ComboBox x:Name="Item2Combo" Grid.Row="7" Grid.Column="1" Margin="0,2" DisplayMemberPath="DisplayName" />
+                                    <TextBlock Grid.Row="8" Text="Item3" Foreground="{StaticResource MutedBrush}" Margin="0,6" />
+                                    <ComboBox x:Name="Item3Combo" Grid.Row="8" Grid.Column="1" Margin="0,2" DisplayMemberPath="DisplayName" />
                                 </Grid>
 
                                 <Grid Margin="0,8,0,8">
@@ -509,12 +515,21 @@
                                         <ColumnDefinition Width="Auto" />
                                         <ColumnDefinition Width="*" />
                                     </Grid.ColumnDefinitions>
+                                    <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
                                     <TextBlock Text="Item0" VerticalAlignment="Center" Margin="0,0,8,0" Foreground="{StaticResource MutedBrush}" />
                                     <ComboBox x:Name="Item0StateCombo" Grid.Column="1" SelectedIndex="0" SelectionChanged="EquipmentState_SelectionChanged">
                                         <ComboBoxItem Content="Held" /><ComboBoxItem Content="Sheathed" />
                                     </ComboBox>
                                     <TextBlock Grid.Column="2" Text="Item1" VerticalAlignment="Center" Margin="12,0,8,0" Foreground="{StaticResource MutedBrush}" />
                                     <ComboBox x:Name="Item1StateCombo" Grid.Column="3" SelectedIndex="0" SelectionChanged="EquipmentState_SelectionChanged">
+                                        <ComboBoxItem Content="Held" /><ComboBoxItem Content="Sheathed" />
+                                    </ComboBox>
+                                    <TextBlock Grid.Row="1" Text="Item2" VerticalAlignment="Center" Margin="0,6,8,0" Foreground="{StaticResource MutedBrush}" />
+                                    <ComboBox x:Name="Item2StateCombo" Grid.Row="1" Grid.Column="1" Margin="0,6,0,0" SelectedIndex="0" SelectionChanged="EquipmentState_SelectionChanged">
+                                        <ComboBoxItem Content="Held" /><ComboBoxItem Content="Sheathed" />
+                                    </ComboBox>
+                                    <TextBlock Grid.Row="1" Grid.Column="2" Text="Item3" VerticalAlignment="Center" Margin="12,6,8,0" Foreground="{StaticResource MutedBrush}" />
+                                    <ComboBox x:Name="Item3StateCombo" Grid.Row="1" Grid.Column="3" Margin="0,6,0,0" SelectedIndex="0" SelectionChanged="EquipmentState_SelectionChanged">
                                         <ComboBoxItem Content="Held" /><ComboBoxItem Content="Sheathed" />
                                     </ComboBox>
                                 </Grid>
@@ -614,6 +629,22 @@
                                 </Grid>
                                 <TextBlock x:Name="PoseStatusText" Margin="0,8,0,0" Foreground="{StaticResource MutedBrush}"
                                            FontSize="11" TextWrapping="Wrap" />
+                                <TextBlock Text="BASE BODY" Margin="0,14,0,8"
+                                           Foreground="{StaticResource AccentBrush}" FontSize="11" FontWeight="Bold" />
+                                <UniformGrid Columns="2">
+                                    <CheckBox x:Name="HideBodyCheckBox" Content="Hide body" Margin="0,0,8,6" Foreground="#D8D4C1"
+                                              ToolTip="Hide body_male_a (auto-hidden under chest armour unless covers_body=&quot;false&quot;)"
+                                              Click="BaseBodyVisibility_Click" />
+                                    <CheckBox x:Name="HideHandsCheckBox" Content="Hide hands" Margin="0,0,8,6" Foreground="#D8D4C1"
+                                              ToolTip="Hide hands_male_a (auto-hidden by gloves with covers_hands=&quot;true&quot;)"
+                                              Click="BaseBodyVisibility_Click" />
+                                    <CheckBox x:Name="HideLegsCheckBox" Content="Hide legs" Margin="0,0,8,6" Foreground="#D8D4C1"
+                                              ToolTip="Hide feet_male_a (auto-hidden under leg armour unless covers_legs=&quot;false&quot;)"
+                                              Click="BaseBodyVisibility_Click" />
+                                    <CheckBox x:Name="HideFaceCheckBox" Content="Hide face" Margin="0,0,8,6" Foreground="#D8D4C1"
+                                              ToolTip="Hide head_male_a (auto-hidden by helmets with covers_head=&quot;true&quot;)"
+                                              Click="BaseBodyVisibility_Click" />
+                                </UniformGrid>
                                 </StackPanel>
                             </StackPanel>
                         </ScrollViewer>
@@ -765,6 +796,11 @@
                                            Foreground="{StaticResource MutedBrush}"
                                            FontSize="12"
                                            Text="Weapon length: -" />
+
+                                <CheckBox x:Name="CraftingGhostHandCheckBox" Margin="0,10,0,0" IsChecked="True" Foreground="#D8D4C1"
+                                          Content="Show hand at grip" Click="CraftingGhostHand_Click"
+                                          ToolTip="Posed Native hand placed where the game holds this weapon (r_finger0, holding pose for the template). Needs the Native animation assets." />
+                                <TextBlock x:Name="CraftingGhostHandStatusText" Foreground="{StaticResource MutedBrush}" FontSize="11" TextWrapping="Wrap" />
 
                                 <StackPanel Orientation="Horizontal" Margin="0,10,0,0">
                                     <Button Click="ApplyCraftingWeapon_Click" Content="Apply" />
@@ -1037,6 +1073,17 @@
                         <ComboBox x:Name="ItemPositionModeCombo" Margin="0,8,0,0" IsEditable="False" SelectedIndex="0" SelectionChanged="ItemPositionSelection_Changed">
                             <ComboBoxItem Content="Held" /><ComboBoxItem Content="Holstered / carried" />
                         </ComboBox>
+                        <StackPanel x:Name="ItemPositionGripPanel" Margin="0,10,0,0" Visibility="Collapsed">
+                            <TextBlock Text="Shield grip" Foreground="{StaticResource MutedBrush}" Margin="0,0,0,4" />
+                            <ComboBox x:Name="ItemPositionGripCombo" IsEditable="False" SelectionChanged="ItemPositionGrip_Changed"
+                                      ToolTip="Strapped = item_usage shield on the forearm bone; centre grip = item_usage hand_shield in the fist">
+                                <ComboBoxItem Content="Strapped (shield, forearm)" Tag="shield" />
+                                <ComboBoxItem Content="Centre grip (hand_shield, fist)" Tag="hand_shield" />
+                            </ComboBox>
+                        </StackPanel>
+                        <CheckBox x:Name="ItemPositionGripViewCheckBox" Margin="0,10,0,0" Foreground="#D8D4C1"
+                                  Content="Grip view (item + bare arm, axis marker)" Click="ItemPositionGripView_Click"
+                                  ToolTip="Hide armour and show the posed bare arm and hand with the X/Y/Z axes of the item frame (red/green/blue)" />
                         <Grid x:Name="ItemPositionAttachmentSteps" Margin="0,10,0,0">
                             <Grid.ColumnDefinitions><ColumnDefinition /><ColumnDefinition Width="10" /><ColumnDefinition /></Grid.ColumnDefinitions>
                             <StackPanel><TextBlock Text="Position step (cm)" Foreground="{StaticResource MutedBrush}" Margin="0,0,0,4" />

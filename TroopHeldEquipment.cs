@@ -92,12 +92,18 @@ public partial class MainWindow
         RenderLoadoutPreview(_troopPreviewTitle, _troopPreviewLoadout);
     }
 
-    private bool IsSlotSheathed(string slot) => (slot == "Item0" ? Item0StateCombo : Item1StateCombo).SelectedIndex == 1;
+    private ComboBox StateComboFor(string slot) => slot switch
+    {
+        "Item0" => Item0StateCombo, "Item1" => Item1StateCombo, "Item2" => Item2StateCombo, _ => Item3StateCombo,
+    };
+
+    private bool IsSlotSheathed(string slot) => StateComboFor(slot).SelectedIndex == 1;
 
     private void RefreshEquipmentStateControls(IReadOnlyDictionary<string, string> loadout)
     {
-        foreach (var (slot, combo) in new[] { ("Item0", Item0StateCombo), ("Item1", Item1StateCombo) })
+        foreach (var slot in WeaponSlots)
         {
+            var combo = StateComboFor(slot);
             XElement? item = null;
             if (loadout.TryGetValue(slot, out var name))
             {
@@ -116,6 +122,7 @@ public partial class MainWindow
     {
         var weapon = item.Descendants().FirstOrDefault(element => element.Name.LocalName == "Weapon");
         if (GetAttributeValue(weapon ?? item, "weapon_class") is { } category) return category;
+        if (CraftedPrimaryWeaponClass(item) is { } primary) return primary;
         var templateId = GetAttributeValue(item, "crafting_template") ?? "";
         if (BundledCraftingBuildOrders.ContainsKey(templateId)) return templateId;
         if (_equipmentTemplates.TryGetValue(templateId, out var template))
@@ -133,7 +140,7 @@ public partial class MainWindow
     {
         _activeWeaponSlot = null;
         _activeWeaponNeedsBothHands = false;
-        foreach (var slot in new[] { "Item0", "Item1" })
+        foreach (var slot in WeaponSlots)
         {
             if (IsSlotSheathed(slot) || !loadout.TryGetValue(slot, out var name)) continue;
             try
@@ -179,8 +186,10 @@ public partial class MainWindow
             .Any(flags => bool.TryParse(GetAttributeValue(flags, "ForceAttachOffHandSecondaryItemBone"), out var enabled) && enabled);
         var offhand = item.Elements().Where(element => element.Name.LocalName == "Flags")
             .Any(flags => bool.TryParse(GetAttributeValue(flags, "ForceAttachOffHandPrimaryItemBone"), out var enabled) && enabled);
+        if (shield && _itemPositions.GetValueOrDefault(reference[5..])?.Grip is { } grip) secondary = grip == "shield";
         var boneName = shield ? secondary ? "l_foretwist1" : "l_finger0" : offhand || category == "Bow" ? "l_finger0" : "r_finger0";
         var attachment = _troopPoses.GetItemAttachment(boneName, TunedWeaponFrame(reference[5..], weapon));
+        _heldAttachments[slot] = attachment;
         var model = LoadEquipmentModel(reference);
         StudioRenderer.AttachToBone(model, attachment.Bone, attachment.Frame);
         _heldEquipmentModels.Add(model);

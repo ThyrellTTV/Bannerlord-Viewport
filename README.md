@@ -28,6 +28,11 @@ See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for exact usage, upstream l
 - Search filters the troop list live by display name or ID, ignoring case. Filtering leaves the displayed preview and custom loadout unchanged.
 - Custom-loadout item selections update the troop render automatically, including held and sheathed weapons. Recognised typed IDs and cleared slots also update the preview; partial search text leaves existing equipment visible. Animation playback continues across live loadout changes.
 - Duplicate IDs keep the first entry in sorted file order. Unreadable folder XML files are skipped and reported in the summary; its tooltip lists the errors. The selected troop file/folder is remembered when **Save settings** is enabled.
+- The custom loadout has all four weapon slots (Item0-Item3), each with a held/sheathed state. The first unsheathed weapon (not a shield or ammunition) is held and the others are carried, so bow + quiver + sidearm troops render complete. Saving a troop writes all four slots back to its first battle roster; slots the viewport does not edit, such as Horse, are kept.
+- Troops render on the Native base body (`body_male_a`, `hands_male_a`, `feet_male_a`, `head_male_a` from `core_game.tpac`). Each part is hidden the way the game hides it: chest and leg armour cover unless they say `covers_body`/`covers_legs="false"`, while gloves and helmets cover only with `covers_hands`/`covers_head="true"`. The **Base body** checkboxes in the pose panel can also hide each part manually.
+- Native animations and base-body meshes are found from the asset/troop path's `Modules` folder. Sources kept outside the game install (for example modules linked into `Modules` by a junction) fall back to the Bannerlord install in any Steam library.
+- Uncooked module packages (`Assets/*.tpac`) are posed using their edit-data skin weights, like cooked armour.
+- Crafted weapons take their held category from the first weapon description of their template whose available pieces include all of the item's pieces, as the engine does. Module `WeaponDescriptions` XSLT patches (`WeaponDescription[@id='X']/AvailablePieces`) are included.
 
 ## Render exports
 
@@ -52,12 +57,16 @@ See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for exact usage, upstream l
 
 The top-right tools share one compact inspector. Applicable sections start collapsed; opening a section closes the previous one. The header button tucks the whole inspector into a small tools icon and restores the current section when reopened. XML previews inside the offset and equipment-position editors are folded separately. Long sections use a single scroll area on smaller windows.
 
-- Equipping Item0 or Item1 shows the equipment-position editor at the top right of the troops viewport. Select an item and its held or holstered/carried state, then adjust XYZ position in centimetres and XYZ rotation in degrees. Undo/redo is per item; reset affects only the selected attachment state.
+- Equipping any weapon slot (Item0-Item3) shows the equipment-position editor at the top right of the troops viewport. Select an item and its held or holstered/carried state, then adjust XYZ position in centimetres and XYZ rotation in degrees. Undo/redo is per item; reset affects only the selected attachment state.
 - Adjustments follow the item ID across loadouts and are remembered between sessions only when **Save settings** is enabled. Preview state does not alter equipment-roster XML.
 - **Copy XML** produces positioning-only fragments or a complete item definition. **Save XML** writes positioning edits directly to the item's source XML, after showing the affected paths for confirmation. Other definitions and unrelated attributes are preserved.
 - Crafted weapons expose a **Crafting piece offsets** editor directly in the troops inspector. Select a piece and adjust `piece_offset`, `previous_piece_offset` and `next_piece_offset` in centimetres; the equipped weapon updates on the current troop pose, including held or sheathed states. Edits are per item, support undo/redo and selected-piece/all-piece reset, and follow the same **Save settings** checkbox.
 - Saving inline piece edits inserts item-specific copies into the original crafting-piece XML and updates the source item's references. Originals and other items sharing those pieces remain unchanged. **Copy XML** includes the corresponding companion-definition snippets for manual use.
 - Crafted weapons get their held frame from crafting data, so generic held position/rotation is disabled. Crafted holster tuning inserts an item-specific template into the source template XML. Holster rotation definitions are added to the loaded Native `item_holsters.xml`, without changing existing shared holsters. The confirmation lists all affected files, including files inside the game install. These writes are not live runtime mod patches.
+- Quivers and pouches (arrows, bolts, bullets, sling stones) use the carried state only: adjust `holster_position_shift` and a holster rotation on the authored quiver mesh, then use **Copy XML** or **Save XML** as for other holsters.
+- Shields have a **Shield grip** choice in the held state: strapped (`item_usage="shield"` with `ForceAttachOffHandSecondaryItemBone`, on the forearm) or centre grip (`item_usage="hand_shield"` with `ForceAttachOffHandPrimaryItemBone`, in the fist). The choice is stored with the item's tuning and is written by **Copy XML** and **Save XML**.
+- **Grip view** hides the armour and shows only the held items on the bare body, arm and hand, plus the item frame's axes (X red, Y green, Z blue).
+- The crafting editor's **Show hand at grip** places a posed Native hand at the point where troops hold the assembled weapon (`r_finger0` with the template's holding pose). This needs the Native animation assets to be loaded.
 
 ## Saving source XML
 

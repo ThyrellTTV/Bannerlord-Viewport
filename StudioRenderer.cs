@@ -283,6 +283,14 @@ internal sealed class StudioRenderer : IDisposable
         Skinning.Add(mesh, ids);
     }
 
+    // Uncooked module packages (Assets/*.tpac) carry edit data instead of a vertex stream; their per-position
+    // weights are decoded by AssetExportMetadata.Skinning and posed the same way as cooked armour.
+    internal static void RegisterSkinning(WpfMesh mesh, BoneIds[] ids)
+    {
+        if (ids.Length != mesh.Positions.Count) return;
+        Skinning.AddOrUpdate(mesh, ids);
+    }
+
     internal static BoneIds[]? GetExportSkinning(WpfMesh mesh) => Skinning.TryGetValue(mesh, out var ids) ? ids : null;
 
     internal static bool CanPose(Model3D model, int boneCount)

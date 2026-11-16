@@ -57,19 +57,46 @@ public partial class MainWindow
     private void RefreshTroopPoseLibrary()
     {
         if (_isUpdatingPoseControls || _poseClosed || !IsLoaded) return;
-        foreach (var source in new[] { AssetPathBox.Text, TroopXmlPathBox.Text })
+        foreach (var modules in CandidateModulesFolders())
         {
-            if (string.IsNullOrWhiteSpace(source)) continue;
-            var directory = Directory.Exists(source) ? new DirectoryInfo(source) : new FileInfo(source).Directory;
-            while (directory != null && !directory.Name.Equals("Modules", StringComparison.OrdinalIgnoreCase)) directory = directory.Parent;
-            if (directory == null) continue;
-            var path = Path.Combine(directory.FullName, "Native", "AssetPackages");
+            var path = Path.Combine(modules, "Native", "AssetPackages");
             if (File.Exists(Path.Combine(path, "animations.tpac")) && File.Exists(Path.Combine(path, "core_game.tpac")))
             {
                 _ = LoadTroopPoseLibraryAsync(path);
                 return;
             }
         }
+    }
+
+    // Sources kept outside the game install (module folders linked into Modules by a junction) have no
+    // "Modules" ancestor on their own path, so the installed game's Modules folders are tried last.
+    private IEnumerable<string> CandidateModulesFolders()
+    {
+        foreach (var source in new[] { AssetPathBox.Text, TroopXmlPathBox.Text })
+        {
+            if (string.IsNullOrWhiteSpace(source)) continue;
+            var directory = Directory.Exists(source) ? new DirectoryInfo(source) : new FileInfo(source).Directory;
+            while (directory != null && !directory.Name.Equals("Modules", StringComparison.OrdinalIgnoreCase)) directory = directory.Parent;
+            if (directory != null) yield return directory.FullName;
+        }
+        foreach (var steam in SteamLibraryFolders())
+            yield return Path.Combine(steam, "steamapps", "common", "Mount & Blade II Bannerlord", "Modules");
+    }
+
+    private static IEnumerable<string> SteamLibraryFolders()
+    {
+        var roots = new List<string>();
+        var steamPath = Microsoft.Win32.Registry.GetValue(@"HKEY_CURRENT_USER\Software\Valve\Steam", "SteamPath", null) as string;
+        if (!string.IsNullOrEmpty(steamPath)) roots.Add(steamPath.Replace('/', Path.DirectorySeparatorChar));
+        roots.Add(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86), "Steam"));
+        foreach (var root in roots.Distinct(StringComparer.OrdinalIgnoreCase).ToList())
+        {
+            var vdf = Path.Combine(root, "steamapps", "libraryfolders.vdf");
+            if (!File.Exists(vdf)) continue;
+            foreach (System.Text.RegularExpressions.Match m in System.Text.RegularExpressions.Regex.Matches(File.ReadAllText(vdf), "\"path\"\\s+\"([^\"]+)\""))
+                roots.Add(m.Groups[1].Value.Replace(@"\\", @"\"));
+        }
+        return roots.Distinct(StringComparer.OrdinalIgnoreCase);
     }
 
     private async Task LoadTroopPoseLibraryAsync(string path)
@@ -99,7 +126,7 @@ public partial class MainWindow
                 foreach (var animation in library.Animations) _poseOptions.Add(animation);
                 PoseAnimationCombo.SelectedIndex = 0;
                 _isUpdatingPoseControls = false;
-                if (_previewWorkspace == 1 && (_troopPreviewLoadout.ContainsKey("Item0") || _troopPreviewLoadout.ContainsKey("Item1")))
+                if (_previewWorkspace == 1 && WeaponSlots.Any(_troopPreviewLoadout.ContainsKey))
                     RenderLoadoutPreview(_troopPreviewTitle, _troopPreviewLoadout);
                 else RefreshTroopPoseAvailability();
             });
