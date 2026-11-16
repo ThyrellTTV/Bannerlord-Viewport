@@ -90,6 +90,7 @@ public partial class MainWindow
             var targetWeapon = target.Descendants("Weapon").FirstOrDefault() ?? throw new InvalidOperationException($"Item '{id}' has no source Weapon element.");
             foreach (var attribute in new[] { "position", "rotation" }) targetWeapon.SetAttributeValue(attribute, GetAttributeValue(weapon, attribute));
         }
+        if (source.Name.LocalName != "CraftedItem" && _itemPositions.GetValueOrDefault(id)?.Grip is { } grip) ApplyGripToItem(target, grip);
         if (documents.Templates?.Root?.Elements().SingleOrDefault() is { } template)
         {
             var originalId = GetAttributeValue(source, "crafting_template") ?? "";

@@ -42,7 +42,7 @@ internal static class ItemPositionChecks
             Wait(() => Field("_troopPoses") != null, "Native rig failed to load");
             var troop = Control<ListBox>("TroopList").Items.Cast<TroopNode>().Single(t => t.Id == "gondor_ca_pikeman");
             var loadout = new Dictionary<string, string>(troop.Equipment);
-            loadout.Remove("Item0"); loadout["Item1"] = "Item.sm_gd_shield_a1";
+            foreach (var weaponSlot in new[] { "Item0", "Item2", "Item3" }) loadout.Remove(weaponSlot); loadout["Item1"] = "Item.sm_gd_shield_a1";
             Control<TabControl>("WorkspaceTabs").SelectedIndex = 1;
             Call("SetEquipmentBoxes", loadout);
             Call("RenderLoadoutPreview", "Shield positioning", loadout);

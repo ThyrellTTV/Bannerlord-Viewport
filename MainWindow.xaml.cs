@@ -26,7 +26,9 @@ public partial class MainWindow : Window
         Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments),
         "Bannerlord Viewport");
     private static readonly string SettingsFilePath = Path.Combine(SettingsDirectory, "settings.json");
-    private static readonly string[] EquipmentSlots = ["Helmet", "Cape", "Body", "Arm", "Leg", "Item0", "Item1"];
+    private static readonly string[] EquipmentSlots = ["Helmet", "Cape", "Body", "Arm", "Leg", "Item0", "Item1", "Item2", "Item3"];
+    private static readonly string[] WeaponSlots = ["Item0", "Item1", "Item2", "Item3"];
+    private static bool IsWeaponSlot(string slot) => WeaponSlots.Contains(slot, StringComparer.OrdinalIgnoreCase);
     private static readonly string[] CraftingSlots = ["Blade", "Guard", "Handle", "Pommel"];
     private static readonly (string Type, int Order)[] DefaultCraftingBuildOrder =
         [("Handle", 0), ("Guard", 1), ("Blade", 2), ("Pommel", -1)];
@@ -1519,7 +1521,10 @@ public partial class MainWindow : Window
 
         if (rendered > 0)
         {
-            assembledWeapon.Transform = CreateFitTransform(assembledWeapon.Bounds);
+            // Fit to the weapon alone, then add the hand so it cannot change the framing.
+            var fit = CreateFitTransform(assembledWeapon.Bounds);
+            AddCraftingGhostHand(assembledWeapon);
+            assembledWeapon.Transform = fit;
             _assetModel.Children.Add(assembledWeapon);
         }
 
@@ -1691,6 +1696,8 @@ public partial class MainWindow : Window
         _equipmentItems.Clear();
         _equipmentCraftingPieces.Clear();
         _equipmentTemplates.Clear();
+        _weaponDescriptionPieces.Clear();
+        _weaponDescriptionClasses.Clear();
         _equipmentPieceDefinitions.Clear();
         _equipmentPieceSourcePaths.Clear();
         _equipmentItemSourcePaths.Clear();
@@ -1765,7 +1772,8 @@ public partial class MainWindow : Window
             var kind = GetAttributeValue(entry, "id");
             if (!string.Equals(kind, "Items", StringComparison.OrdinalIgnoreCase) &&
                 !string.Equals(kind, "CraftingPieces", StringComparison.OrdinalIgnoreCase) &&
-                !string.Equals(kind, "CraftingTemplates", StringComparison.OrdinalIgnoreCase))
+                !string.Equals(kind, "CraftingTemplates", StringComparison.OrdinalIgnoreCase) &&
+                !string.Equals(kind, "WeaponDescriptions", StringComparison.OrdinalIgnoreCase))
             {
                 continue;
             }
@@ -1779,7 +1787,9 @@ public partial class MainWindow : Window
             var dataPath = Path.Combine(modulePath, "ModuleData", relativePath);
             var files = Directory.Exists(dataPath)
                 ? Directory.EnumerateFiles(dataPath, "*.xml", SearchOption.AllDirectories).OrderBy(path => path)
-                : File.Exists(dataPath + ".xml") ? new[] { dataPath + ".xml" }.AsEnumerable() : [];
+                : File.Exists(dataPath + ".xml") ? new[] { dataPath + ".xml" }.AsEnumerable()
+                : string.Equals(kind, "WeaponDescriptions", StringComparison.OrdinalIgnoreCase) && File.Exists(dataPath + ".xslt")
+                    ? new[] { dataPath + ".xslt" }.AsEnumerable() : [];
             foreach (var file in files)
             {
                 var document = XDocument.Load(file);
@@ -1807,6 +1817,18 @@ public partial class MainWindow : Window
                     {
                         _equipmentTemplates[templateId] = element;
                         _equipmentTemplateSourcePaths[templateId] = Path.GetFullPath(file);
+                    }
+                    else if (element.Name.LocalName == "WeaponDescription" && element.Parent?.Name.LocalName == "WeaponDescriptions" &&
+                             element.Parent.Parent == null &&
+                             GetAttributeValue(element, "id") is { } descriptionId)
+                    {
+                        if (GetAttributeValue(element, "weapon_class") is { } weaponClass) _weaponDescriptionClasses[descriptionId] = weaponClass;
+                        AddWeaponDescriptionPieces(descriptionId, element);
+                    }
+                    else if (element.Name.LocalName == "template" &&
+                             WeaponDescriptionPatch.Match(GetAttributeValue(element, "match") ?? "") is { Success: true } patch)
+                    {
+                        AddWeaponDescriptionPieces(patch.Groups[1].Value, element);
                     }
                 }
             }
@@ -2008,6 +2030,8 @@ public partial class MainWindow : Window
         AddSlotValue(loadout, "Leg", GetComboValue(LegCombo));
         AddSlotValue(loadout, "Item0", GetComboValue(Item0Combo));
         AddSlotValue(loadout, "Item1", GetComboValue(Item1Combo));
+        AddSlotValue(loadout, "Item2", GetComboValue(Item2Combo));
+        AddSlotValue(loadout, "Item3", GetComboValue(Item3Combo));
         return loadout;
     }
 
@@ -2074,7 +2098,7 @@ public partial class MainWindow : Window
         };
         var matches = _equipmentItems.Where(pair =>
             string.Equals(GetAttributeValue(pair.Value, "mesh"), value, StringComparison.OrdinalIgnoreCase) &&
-            (slot is "Item0" or "Item1" ? IsWeaponItem(pair.Value) :
+            (IsWeaponSlot(slot) ? IsWeaponItem(pair.Value) :
                 GetAttributeValue(pair.Value, "type") is not { Length: > 0 } type || type.Equals(itemType, StringComparison.OrdinalIgnoreCase)))
             .Select(pair => GetAttributeValue(pair.Value, "id") ?? pair.Key).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
         if (matches.Length == 1) return "Item." + matches[0];
@@ -2164,6 +2188,8 @@ public partial class MainWindow : Window
             SetComboValue(LegCombo, GetSlotValue(loadout, "Leg"));
             SetComboValue(Item0Combo, GetSlotValue(loadout, "Item0"));
             SetComboValue(Item1Combo, GetSlotValue(loadout, "Item1"));
+            SetComboValue(Item2Combo, GetSlotValue(loadout, "Item2"));
+            SetComboValue(Item3Combo, GetSlotValue(loadout, "Item3"));
             _equipmentSearchText.Clear();
         }
         finally { _isUpdatingComboFilters = wasUpdating; }
@@ -2179,6 +2205,8 @@ public partial class MainWindow : Window
         yield return LegCombo;
         yield return Item0Combo;
         yield return Item1Combo;
+        yield return Item2Combo;
+        yield return Item3Combo;
     }
 
     private static string GetComboValue(ComboBox comboBox)
@@ -2221,6 +2249,7 @@ public partial class MainWindow : Window
         _troopHeldCategory = "";
         _usedHolsterGroups.Clear();
         _heldEquipmentModels.Clear();
+        _heldAttachments.Clear();
         _assetModel.Children.Clear();
         if (_craftingPieces.Any(piece => piece.IsDirty)) _equipmentPreviewModels.Clear();
         var assembledLoadout = new Model3DGroup();
@@ -2244,10 +2273,11 @@ public partial class MainWindow : Window
             {
                 continue;
             }
+            if (_gripView && !IsWeaponSlot(slot)) continue;
 
             try
             {
-                var model = slot is "Item0" or "Item1"
+                var model = IsWeaponSlot(slot)
                     ? LoadHeldEquipmentModel(equipmentName, slot) : LoadEquipmentModel(equipmentName);
                 assembledLoadout.Children.Add(model);
                 _troopExportModels[model] = $"{slot}_{equipmentName}";
@@ -2259,6 +2289,9 @@ public partial class MainWindow : Window
             }
         }
 
+        // Grip view drops the armour, so nothing covers the bare body, arm and hand.
+        AddBaseBody(assembledLoadout, _gripView ? new Dictionary<string, string>() : loadout);
+        if (_gripView) AddGripAxes(assembledLoadout);
         if (assembledLoadout.Children.Count > 0)
         {
             // Mesh loading already converts the axes; preserve the equipment's shared origin.
@@ -2815,6 +2848,7 @@ public partial class MainWindow : Window
         }
 
         AssetExportMetadata.SetEdit(mesh, editData);
+        if (AssetExportMetadata.Skinning(mesh) is { } skinning) StudioRenderer.RegisterSkinning(mesh, skinning);
         return CreateModel(mesh, material, ColorFromName(name));
     }
 

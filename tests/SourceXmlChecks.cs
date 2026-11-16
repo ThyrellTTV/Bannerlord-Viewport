@@ -89,7 +89,7 @@ internal static class SourceXmlChecks
             var troop = Control<ListBox>("TroopList").Items.Cast<TroopNode>().Single(t => t.Id == "test_guard");
             Assert(troop.Equipment["Body"] == "Item.armour_a", "Preview did not use first battle roster");
             Control<ListBox>("TroopList").SelectedItem = troop;
-            Call("SetEquipmentBoxes", new Dictionary<string, string> { ["Body"] = "Item.armour_b", ["Item0"] = "Item.sword", ["Item1"] = "Item.shield" });
+            Call("SetEquipmentBoxes", new Dictionary<string, string> { ["Body"] = "Item.armour_b", ["Item0"] = "Item.sword", ["Item1"] = "Item.shield", ["Item3"] = "Item.ammo" });
             positions["shield"] = new() { Held = new() { X = .05f, RY = 25 }, Holstered = new() { Y = .12f } };
             positions["sword"] = new() { Holstered = new() { Z = .07f }, Pieces = new() { ["blade"] = new() { PieceOffset = 5, PreviousPieceOffset = 2, NextPieceOffset = -3 } } };
             var originalTroops = XDocument.Load(troopPath); var originalPieces = XDocument.Load(piecePath); var originalTemplates = XDocument.Load(templatePath);
@@ -104,7 +104,7 @@ internal static class SourceXmlChecks
             Assert(XNode.DeepEquals(rosters[0], oldRosters[0]) && XNode.DeepEquals(rosters[2], oldRosters[2]), "Civilian/variant roster changed");
             Assert((string?)rosters[1].Attribute("custom") == "preserve" && rosters[1].Elements("equipment").Single(e => (string?)e.Attribute("slot") == "Body").Attribute("id")!.Value == "Item.armour_b", "Battle loadout not merged");
             Assert(!rosters[1].Elements("equipment").Any(e => (string?)e.Attribute("slot") == "Head"), "Cleared slot remained in source");
-            Assert(rosters[1].Elements("equipment").Any(e => (string?)e.Attribute("slot") == "Item3") && rosters[1].Elements("equipment").Any(e => (string?)e.Attribute("slot") == "Horse"), "Unsupported slots removed");
+            Assert(rosters[1].Elements("equipment").Any(e => (string?)e.Attribute("slot") == "Item3") && rosters[1].Elements("equipment").Any(e => (string?)e.Attribute("slot") == "Horse"), "Quiver slot or unsupported Horse slot removed");
             Assert((string?)savedTroop.Attribute("level") == "25" && savedTroop.Descendants("skill").Any(), "Troop metadata removed");
             Assert(XNode.DeepEquals(savedTroops.Descendants("NPCCharacter").Last(), originalTroops.Descendants("NPCCharacter").Last()), "Unrelated troop changed");
             var shield = savedItems.Descendants("Item").Single(i => (string?)i.Attribute("id") == "shield");
